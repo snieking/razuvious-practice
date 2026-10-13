@@ -14,11 +14,13 @@ Ability bindings are configurable and saved in the browser. Match them to the ke
 
 | Default input | Action |
 | --- | --- |
-| Click an enemy nameplate or Tab | Select a target |
+| Click an enemy body, marker or nameplate, or Tab | Select a target |
 | W / S | Forward / backward |
 | A / D | Turn left / right |
 | Q / E | Strafe left / right |
-| Right mouse drag | Steer the character |
+| Hold right mouse + move mouse | Steer the character and tilt the camera |
+| A / D while right mouse is held | Strafe left / right |
+| Hold both mouse buttons | Move forward while steering |
 | Left mouse drag | Orbit the camera |
 | Mouse wheel | Zoom the camera |
 | 1 | Mind Soothe |
@@ -32,7 +34,7 @@ Ability bindings are configurable and saved in the browser. Match them to the ke
 | P | Pause or resume unless rebound |
 | R | Restart unless rebound |
 
-The buttons also work with mouse or touch. Some browsers reserve modified number keys. Change those bindings or click the pet bar if your browser intercepts them.
+NPCs have generous selection regions around their bodies and nameplates, with hover feedback. Held right-click uses relative mouse movement where the browser supports pointer lock, so steering continues beyond the screen edge. Releasing right-click restores the cursor. The buttons also work with mouse or touch. Some browsers reserve modified number keys. Change those bindings or click the pet bar if your browser intercepts them.
 
 Settings include A/D strafing, control registration delay, handoff timing, an initial Mark of the Wild buff, and optional simulated resists. Guided mode shows the current objective, range circles, a tanking marker, and prompts. Raid night hides those aids and randomizes the patrol's starting point. Progress stays in the browser.
 

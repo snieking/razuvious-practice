@@ -19,11 +19,11 @@ import * as THREE from './vendor/three.module.min.js';
  let mode='pull', guided=true, sound=false, audioContext, tactical=false;
  let state, keys=new Set(), lastFrame=performance.now(), visualTime=0, lastUI=0;
  let overlayCtx=dom.overlay.getContext('2d'), roomView, fallbackCtx, renderPoints=[];
- let viewWidth=0,viewHeight=0,displayScale=1,dialogsPaused=false,cameraOrbit=0,cameraDistance=14,minimapZoom=1,pointerDrag=null;
+ let viewWidth=0,viewHeight=0,displayScale=1,dialogsPaused=false,cameraOrbit=0,cameraDistance=14,cameraPitch=Math.atan(.48),minimapZoom=1,pointerDrag=null,mouseButtons=0,pointerLocked=false,intendedUnlock=false,hoveredNpc=null,frameDelta=1/60;
  const icon=(name)=>'<svg><use href="#i-'+name+'"/></svg>';
  function newAdd(id,x,z){return{id,x,z,start:{x,z},health:100,soothe:0,wall:0,wallCD:0,tauntCD:0,immune:0,controlled:false,attacking:false,angle:Math.PI,moving:false}}
  function reset(startNow=false){
-  keys.clear();cameraOrbit=0;const handoff=mode==='handoff';
+  keys.clear();clearMouseInput();cameraOrbit=0;cameraPitch=Math.atan(.48);const handoff=mode==='handoff';
   state={status:'ready',t:0,priest:{id:'you',x:11,z:handoff?27:31,angle:Math.PI,health:100,mana:100},raid:[{id:'raid1',x:13,z:28.5,angle:Math.PI,health:100},{id:'raid2',x:15,z:31,angle:Math.PI,health:100},{id:'partner',x:11.5,z:29.5,angle:Math.PI,health:100}],adds:[newAdd('A',-10,5),newAdd('B',10,5),newAdd('C',-10,-17),newAdd('D',10,-17)],boss:{id:'boss',x:8,z:-16,angle:0,health:100},target:'B',pet:null,cast:null,registration:0,channel:0,gcd:0,combat:false,aggro:null,taunt:0,partner:0,partnerChannel:0,steps:[false,false,false,false,false],penalties:0,notes:[],logs:[],toast:null,hold:0,coverState:null,wallAtTaunt:0,handoffMargin:null,mark:!!settings.mark,latency:settings.latency/1000,resists:!!settings.resists,warning:false,shout:handoff?8:25,shoutCast:0,history:[],patrolOffset:Math.random()*(guided?6:40),challenge:!guided,success:false};
   if(handoff){const a=state.adds[0],b=state.adds[1];a.x=6.3;a.z=15;a.wall=Number(settings.handoff);a.controlled=true;b.x=10;b.z=16.7;state.boss.x=3.1;state.boss.z=15;state.boss.angle=Math.PI/2;state.combat=true;state.aggro='A';state.taunt=Number(settings.handoff);state.partner=Number(settings.handoff);state.partnerChannel=Number(settings.handoff)+2.4;state.steps[0]=true}
   dom.result.hidden=true;dom.result.classList.remove('failed');dom.opening.hidden=false;dom.viewport.classList.add('ready');$('#pause-button').innerHTML=icon('clock')+' Pause';$('.paused-badge')?.remove();
@@ -43,6 +43,9 @@ import * as THREE from './vendor/three.module.min.js';
  function tone(freq,duration=.1){if(!sound)return;try{audioContext??=new (window.AudioContext||window.webkitAudioContext)();audioContext.resume();const osc=audioContext.createOscillator(),gain=audioContext.createGain();osc.type='sine';osc.frequency.value=freq;gain.gain.setValueAtTime(.07,audioContext.currentTime);gain.gain.exponentialRampToValueAtTime(.001,audioContext.currentTime+duration);osc.connect(gain);gain.connect(audioContext.destination);osc.start();osc.stop(audioContext.currentTime+duration)}catch{}}
  const getTarget=()=>state.target==='boss'?state.boss:state.adds.find(a=>a.id===state.target);
  const pet=()=>state.adds.find(a=>a.id===state.pet);
+ const controlledActor=()=>pet()&&state.registration<=0?pet():state.priest;
+ const rightMouseHeld=()=>!!(mouseButtons&2);
+ function movementInput(){const strafeKeys=settings.movement==='strafe'||rightMouseHeld();return{forward:(keys.has('w')||(mouseButtons&3)===3?1:0)-(keys.has('s')?1:0),strafe:(keys.has('e')||strafeKeys&&keys.has('d')?1:0)-(keys.has('q')||strafeKeys&&keys.has('a')?1:0),turn:strafeKeys?0:(keys.has('a')?1:0)-(keys.has('d')?1:0)}}
  function selectTarget(id){state.target=id;updateUI();tone(350,.035)}
  function cycleTarget(){if(state.pet&&state.target===state.pet){selectTarget('boss');return}const order=state.pet?['boss',...state.adds.map(a=>a.id)]:mode==='handoff'?['B','C','D','A','boss']:['A','B','boss','C','D'];selectTarget(order[(order.indexOf(state.target)+1)%order.length])}
  function los(a,b){
@@ -115,16 +118,14 @@ import * as THREE from './vendor/three.module.min.js';
   }
  }
  function breakControl(reason){const p=pet();if(p){p.controlled=false;p.immune=45;p.attacking=false}state.pet=null;state.cast=null;state.registration=0;state.channel=0;addLog('Mind Control broken.','error');fail('Mind Control broke.',reason)}
- function fail(title,reason){if(state.status!=='running')return;state.status='failed';keys.clear();state.success=false;tone(170,.35);addLog(title,'error');state.toast=null;dom.result.hidden=false;dom.result.classList.add('failed');dom.result.innerHTML='<div class="eyebrow">ATTEMPT '+pad(stats.runs)+'</div><h2>'+title+'</h2><p>'+reason+'</p><div class="result-detail">'+(mode==='pull'?'Soothe → position → MC → wait → Wall → Taunt':'MC → wait → boss target → Wall → Taunt')+'</div><button class="primary" id="retry-button">'+icon('reset')+' Try again <kbd>R</kbd></button><button class="secondary-result" id="review-button">Review the field guide</button>';$('#retry-button').onclick=()=>reset(true);$('#review-button').onclick=()=>openDialog('guide');updateUI()}
- function success(){if(state.status!=='running')return;state.status='success';state.success=true;keys.clear();const score=clamp(100-state.penalties,0,100);if(score>=90)stats.clean++;stats.best=Math.max(stats.best,score);saveStats();tone(660,.2);addLog('Clean control. Drill complete.','success');dom.result.hidden=false;dom.result.classList.remove('failed');const detail=mode==='handoff'?'Taunt landed '+Math.max(0,state.handoffMargin).toFixed(1)+'s before the outgoing wall expired.':'Safe approach, registered control, Shield Wall before Taunt.';dom.result.innerHTML='<div class="eyebrow">'+(score>=90?'CLEAN RUN':'DRILL COMPLETE')+'</div><h2>'+(mode==='pull'?'The room is yours.':'A clean change of hands.')+'</h2><div class="result-score">'+score+'<small> / 100</small></div><p>'+detail+'</p><div class="result-detail">'+(state.notes[0]||'Razuvious stayed hidden from mana users for 6 seconds.')+'</div><button class="primary" id="retry-button">'+icon('reset')+' Practice again <kbd>R</kbd></button><button class="secondary-result" id="next-button">'+(mode==='pull'?'Practice the handoff →':'Practice the pull →')+'</button>';$('#retry-button').onclick=()=>reset(true);$('#next-button').onclick=()=>changeMode(mode==='pull'?'handoff':'pull');updateUI()}
+ function fail(title,reason){if(state.status!=='running')return;state.status='failed';keys.clear();clearMouseInput();state.success=false;tone(170,.35);addLog(title,'error');state.toast=null;dom.result.hidden=false;dom.result.classList.add('failed');dom.result.innerHTML='<div class="eyebrow">ATTEMPT '+pad(stats.runs)+'</div><h2>'+title+'</h2><p>'+reason+'</p><div class="result-detail">'+(mode==='pull'?'Soothe → position → MC → wait → Wall → Taunt':'MC → wait → boss target → Wall → Taunt')+'</div><button class="primary" id="retry-button">'+icon('reset')+' Try again <kbd>R</kbd></button><button class="secondary-result" id="review-button">Review the field guide</button>';$('#retry-button').onclick=()=>reset(true);$('#review-button').onclick=()=>openDialog('guide');updateUI()}
+ function success(){if(state.status!=='running')return;state.status='success';state.success=true;keys.clear();clearMouseInput();const score=clamp(100-state.penalties,0,100);if(score>=90)stats.clean++;stats.best=Math.max(stats.best,score);saveStats();tone(660,.2);addLog('Clean control. Drill complete.','success');dom.result.hidden=false;dom.result.classList.remove('failed');const detail=mode==='handoff'?'Taunt landed '+Math.max(0,state.handoffMargin).toFixed(1)+'s before the outgoing wall expired.':'Safe approach, registered control, Shield Wall before Taunt.';dom.result.innerHTML='<div class="eyebrow">'+(score>=90?'CLEAN RUN':'DRILL COMPLETE')+'</div><h2>'+(mode==='pull'?'The room is yours.':'A clean change of hands.')+'</h2><div class="result-score">'+score+'<small> / 100</small></div><p>'+detail+'</p><div class="result-detail">'+(state.notes[0]||'Razuvious stayed hidden from mana users for 6 seconds.')+'</div><button class="primary" id="retry-button">'+icon('reset')+' Practice again <kbd>R</kbd></button><button class="secondary-result" id="next-button">'+(mode==='pull'?'Practice the handoff →':'Practice the pull →')+'</button>';$('#retry-button').onclick=()=>reset(true);$('#next-button').onclick=()=>changeMode(mode==='pull'?'handoff':'pull');updateUI()}
  function update(dt){
   if(state.status!=='running')return;state.t+=dt;state.gcd=Math.max(0,state.gcd-dt);
   for(const a of state.adds){a.soothe=Math.max(0,a.soothe-dt);a.wall=Math.max(0,a.wall-dt);a.wallCD=Math.max(0,a.wallCD-dt);a.tauntCD=Math.max(0,a.tauntCD-dt);a.immune=Math.max(0,a.immune-dt);a.moving=false}
   state.taunt=Math.max(0,state.taunt-dt);
-  const actor=pet()&&state.registration<=0?pet():state.priest;
-  const forward=(keys.has('w')?1:0)-(keys.has('s')?1:0);
-  const strafe=(keys.has('e')||settings.movement==='strafe'&&keys.has('d')?1:0)-(keys.has('q')||settings.movement==='strafe'&&keys.has('a')?1:0);
-  if(settings.movement==='classic')actor.angle+=((keys.has('a')?1:0)-(keys.has('d')?1:0))*2.4*dt;
+  const actor=controlledActor(),{forward,strafe,turn}=movementInput();
+  actor.angle+=turn*2.4*dt;
   if(forward||strafe){
    if(state.cast){breakControl('You moved your priest during the 3-second cast. Stand still until the cast and registration pause finish.');return}
    if(state.registration>0){breakControl('You moved before control registered. That moved your priest and broke MC. Wait for the camera to shift and the pet bar to appear.');return}
@@ -201,7 +202,7 @@ import * as THREE from './vendor/three.module.min.js';
   const showToast=state.toast&&state.toast.until>=state.t&&state.status==='running'&&(guided||state.toast.error);dom.callout.hidden=!showToast;if(showToast){$('#callout-text').textContent=state.toast.message;dom.callout.classList.toggle('error',state.toast.error)}
  }
  function changeMode(newMode){mode=newMode;$$('[data-mode]').forEach(b=>{const chosen=b.dataset.mode===mode;b.classList.toggle('selected',chosen);b.setAttribute('aria-selected',chosen)});reset()}
- function pause(){if(!['running','paused'].includes(state.status))return;if(state.status==='running'){state.status='paused';keys.clear();const badge=document.createElement('div');badge.className='paused-badge';badge.textContent='Practice paused';dom.viewport.append(badge);$('#pause-button').innerHTML=icon('play')+' Resume'}else{state.status='running';$('.paused-badge')?.remove();$('#pause-button').innerHTML=icon('clock')+' Pause'}updateUI()}
+ function pause(){if(!['running','paused'].includes(state.status))return;if(state.status==='running'){state.status='paused';keys.clear();clearMouseInput();const badge=document.createElement('div');badge.className='paused-badge';badge.textContent='Practice paused';dom.viewport.append(badge);$('#pause-button').innerHTML=icon('play')+' Resume'}else{state.status='running';$('.paused-badge')?.remove();$('#pause-button').innerHTML=icon('clock')+' Pause'}updateUI()}
  function openDialog(name){
   if(state.status==='running'){pause();dialogsPaused=true}$('#'+name+'-dialog').showModal();
   if(name==='guide')showGuide('controls');
@@ -212,7 +213,7 @@ import * as THREE from './vendor/three.module.min.js';
   $$('[data-guide]').forEach(b=>b.classList.toggle('selected',b.dataset.guide===tab));
   const macro='#showtooltip Mind Control\n/cancelaura Mark of the Wild\n/cancelaura Gift of the Wild\n/cast [nopet,harm] Mind Control\n/petattack\n/cast Shield Wall\n/cast Taunt';
   const content={
-   controls:'<p>Click an enemy nameplate or use <kbd>Tab</kbd> to target. <kbd>Enter</kbd> begins the drill. Bind your abilities to the same keys you use in WoW under Bindings & settings.</p><div class="guide-grid"><div><kbd>W</kbd> Forward. <kbd>S</kbd> Backward.<br><kbd>A</kbd><kbd>D</kbd> Turn. <kbd>Q</kbd><kbd>E</kbd> Strafe.<br>A/D strafing is available in settings.</div><div>Right-drag turns your character.<br>Left-drag orbits the camera.<br>Scroll changes camera distance.<br>The minimap button opens a tactical view.</div><div>Mind Soothe: <kbd>'+bindings.soothe+'</kbd><br>MC macro: <kbd>'+bindings.macro+'</kbd><br>Priest heal: <kbd>'+bindings.heal+'</kbd></div><div>Pet attack: <kbd>'+bindings.attack+'</kbd><br>Taunt: <kbd>'+bindings.taunt+'</kbd><br>Shield Wall: <kbd>'+bindings.wall+'</kbd></div><div><kbd>F</kbd> Also runs your MC macro unless assigned to another ability. First press casts MC. Once the camera shifts and pet bar appears, target Razuvious and press again. Repeat when he enters Taunt range.</div><div><kbd>Esc</kbd> Cancels MC.<br>Any priest spell cancels established MC.<br><kbd>P</kbd> Pause. <kbd>R</kbd> Restart.<br>Rebound ability keys take priority.</div></div><p>The macro does not select Razuvious. Retarget him during the MC cast or after the pet bar appears. Widow\'s Embrace and Destroy egg belong to other encounters and are omitted here.</p><pre class="macro-code"></pre><button class="copy-macro">Copy Razuvious macro</button>',
+   controls:'<p>Click an enemy body, marker or nameplate, or use <kbd>Tab</kbd> to target. <kbd>Enter</kbd> begins the drill. Bind your abilities to the same keys you use in WoW under Bindings & settings.</p><div class="guide-grid"><div><kbd>W</kbd> Forward. <kbd>S</kbd> Backward.<br><kbd>A</kbd><kbd>D</kbd> Turn. <kbd>Q</kbd><kbd>E</kbd> Strafe.<br>A/D strafing is available in settings.</div><div>Hold right-click to steer with the mouse.<br>A/D strafe while right-click is held.<br>Hold both mouse buttons to move forward.<br>Left-drag orbits the camera.<br>Scroll changes camera distance.<br>The minimap button opens a tactical view.</div><div>Mind Soothe: <kbd>'+bindings.soothe+'</kbd><br>MC macro: <kbd>'+bindings.macro+'</kbd><br>Priest heal: <kbd>'+bindings.heal+'</kbd></div><div>Pet attack: <kbd>'+bindings.attack+'</kbd><br>Taunt: <kbd>'+bindings.taunt+'</kbd><br>Shield Wall: <kbd>'+bindings.wall+'</kbd></div><div><kbd>F</kbd> Also runs your MC macro unless assigned to another ability. First press casts MC. Once the camera shifts and pet bar appears, target Razuvious and press again. Repeat when he enters Taunt range.</div><div><kbd>Esc</kbd> Cancels MC.<br>Any priest spell cancels established MC.<br><kbd>P</kbd> Pause. <kbd>R</kbd> Restart.<br>Rebound ability keys take priority.</div></div><p>The macro does not select Razuvious. Retarget him during the MC cast or after the pet bar appears. Widow\'s Embrace and Destroy egg belong to other encounters and are omitted here.</p><pre class="macro-code"></pre><button class="copy-macro">Copy Razuvious macro</button>',
    mechanics:'<ul class="guide-list"><li><strong>Mind Soothe.</strong> Instant, 40 yd range, 1.5s global cooldown. Reduces the target\'s detection range by 10 yd for 15s. It does not soothe Razuvious when cast on an add.</li><li><strong>Mind Control.</strong> 3s cast, 20 yd cast range, up to 60s channel. Stand still through the cast and registration pause. The camera and pet bar switch to the add after registration. Initial casting requires line of sight. Losing line of sight after control is established does not, by itself, end the channel. Priest spells and Escape cancel control.</li><li><strong>Shield Wall.</strong> 75% damage reduction for 20s, 30s cooldown. Use it before Taunt. It is an understudy ability, not the priest\'s Power Word: Shield.</li><li><strong>Taunt.</strong> 5 yd range, 20s forced attack, 60s cooldown. Auto attacks build threat, so expiry does not automatically make the boss change targets. Rotate before protection or control expires.</li><li><strong>Mind Exhaustion.</strong> Releasing an understudy leaves it immune to another MC for 45s. Choose a different available add.</li><li><strong>Positioning.</strong> Razuvious uses Disrupting Shout about every 25s. It hits mana users who can see him. Move the boss behind the ramp corner with your understudy and keep the raid behind the wall. This drill does not require healer line of sight to the understudy or healing while Shield Wall is active.</li></ul>',
    sources:'<p>Based on the level-60, 40-player Classic encounter. The room is a procedural reconstruction of the circular training floor, four understudies and entry ramp. It is not a copy of the game map.</p><div class="guide-links"><a href="https://www.reddit.com/r/classicwow/comments/lbwj6q/mind_control_on_razuvious_breaking_from_los/" target="_blank" rel="noopener noreferrer">Classic priest reports · MC and line of sight ↗</a><a href="https://warcraft.wiki.gg/wiki/Channeling" target="_blank" rel="noopener noreferrer">Warcraft Wiki · Channeled spells and line of sight ↗</a><a href="https://www.wowhead.com/classic/guide/instructor-razuvious-naxxramas-raid-strategy" target="_blank" rel="noopener noreferrer">Wowhead · Classic Razuvious encounter guide ↗</a><a href="https://www.wowhead.com/classic/spell=29060/taunt" target="_blank" rel="noopener noreferrer">Classic spell data · Taunt ↗</a><a href="https://www.wowhead.com/classic/spell=29061/shield-wall" target="_blank" rel="noopener noreferrer">Classic spell data · Shield Wall ↗</a><a href="https://www.wowhead.com/classic/spell=10953/mind-soothe" target="_blank" rel="noopener noreferrer">Classic spell data · Mind Soothe ↗</a><a href="https://wowwiki-archive.fandom.com/wiki/Instructor_Razuvious_(original)" target="_blank" rel="noopener noreferrer">Original encounter notes · Mind Soothe pull ↗</a><a href="https://www.sageguide.net/naxxramas" target="_blank" rel="noopener noreferrer">Sage Guide · Room and ramp positioning reference ↗</a></div><p><strong>Training approximations.</strong> Room scale, detection radii, the clockwise patrol path, movement, line of sight and damage are estimates. The geometry models two solid ramp rails. The HUD and camera follow the Classic layout, with procedural character and room models. The 200–600 ms registration delay is configurable practice latency. The outgoing partner\'s channel ends 2.4s after the wall to make late handoffs visible. A 100 yd possession limit follows original-era notes, not a verified current-server distance.</p><p>The channel LOS rule is based on first-hand Classic priest reports and channeling documentation. A Blizzard statement specific to Razuvious MC was not found.</p><p>Guided mode shows detection circles and the patrol. Raid night hides these aids. Optional resists use a deliberately exaggerated 10% rate. Random heartbeat breaks, full threat tables, talents, server batching and the wider raid are not simulated. This tool trains the sequence and timing; confirm positioning and spell behavior with your raid.</p><p>Spell icons are Blizzard game assets served by Wowhead. World of Warcraft belongs to Blizzard Entertainment. This trainer is independent. Progress is stored only in your browser.</p>'
   };
@@ -232,10 +233,53 @@ import * as THREE from './vendor/three.module.min.js';
  }
  function shortBinding(value){return value.replace('Ctrl+','C-').replace('Shift+','S-').replace('Alt+','A-').replace('Meta+','M-')}
  function updateBindings(){
-  dom.viewport.setAttribute('aria-label','Practice arena. W and S move, A and D '+(settings.movement==='classic'?'turn, Q and E strafe':'strafe')+'. Right-drag to steer. '+bindings.soothe+' Mind Soothe, '+bindings.macro+' MC macro, '+bindings.attack+' pet attack, '+bindings.taunt+' Taunt, '+bindings.wall+' Shield Wall. Bindings are configurable.');
+  dom.viewport.setAttribute('aria-label','Practice arena. W and S move, A and D '+(settings.movement==='classic'?'turn, Q and E strafe':'strafe')+'. Hold right-click to steer; A and D strafe while held. Both mouse buttons move forward. '+bindings.soothe+' Mind Soothe, '+bindings.macro+' MC macro, '+bindings.attack+' pet attack, '+bindings.taunt+' Taunt, '+bindings.wall+' Shield Wall. Bindings are configurable.');
   $$('[data-bind]').forEach(button=>{const key=bindings[button.dataset.bind];button.querySelector('.spell-art b').textContent=shortBinding(key);button.setAttribute('aria-keyshortcuts',key);button.dataset.tooltip ||= button.getAttribute('title')||button.querySelector('span:last-child').textContent;button.setAttribute('title',button.dataset.tooltip+' · '+key)});
  }
- function isTranslating(){return keys.has('w')||keys.has('s')||keys.has('q')||keys.has('e')||settings.movement==='strafe'&&(keys.has('a')||keys.has('d'))}
+ function isTranslating(){const input=movementInput();return !!(input.forward||input.strafe)}
+ function clearMouseInput(){
+  mouseButtons=0;pointerDrag=null;hoveredNpc=null;dom.viewport.classList.remove('mouse-look','npc-hover');
+  if(document.pointerLockElement===dom.viewport){intendedUnlock=true;document.exitPointerLock?.()}
+ }
+ function targetAt(x,y){
+  const targets=renderPoints.filter(p=>['A','B','C','D','boss'].includes(p.id));
+  const nameHit=targets.filter(p=>Math.abs(p.x-x)<=p.width/2+9&&y>=p.y-17&&y<=p.y+15||p.marker&&Math.abs(p.marker.x-x)<=15&&Math.abs(p.marker.y-y)<=15).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0];
+  if(nameHit)return nameHit.id;
+  const exact=roomView?.pickNpc(x,y);if(exact)return exact;
+  const bodies=targets.filter(p=>p.body&&x>=p.body.left-18&&x<=p.body.right+18&&y>=p.body.top-14&&y<=p.body.bottom+18);
+  bodies.sort((a,b)=>bodyHitScore(a.body,x,y)-bodyHitScore(b.body,x,y));if(bodies[0])return bodies[0].id;
+  return targets.filter(p=>Math.abs(p.x-x)<=p.width/2+22&&Math.abs(p.y-y)<=48).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0]?.id||null;
+ }
+ function bodyHitScore(box,x,y){return Math.hypot((x-(box.left+box.right)/2)/Math.max(1,(box.right-box.left)/2),(y-(box.top+box.bottom)/2)/Math.max(1,(box.bottom-box.top)/2))}
+ function updateHover(clientX,clientY){
+  const rect=dom.viewport.getBoundingClientRect(),x=clientX-rect.left,y=clientY-rect.top;hoveredNpc=x>=0&&x<=rect.width&&y>=0&&y<=rect.height?targetAt(x,y):null;dom.viewport.classList.toggle('npc-hover',!!hoveredNpc);
+ }
+ function beginMouse(e){
+  if(e.button!==0&&e.button!==2||$('dialog[open]'))return;
+  const inWorld=e.target===dom.room||e.target===dom.overlay||e.target===dom.viewport||document.pointerLockElement===dom.viewport;if(!inWorld)return;
+  e.preventDefault();dom.viewport.focus({preventScroll:true});const previous=mouseButtons;mouseButtons|=e.button===0?1:2;
+  pointerDrag??={button:e.button,startX:e.clientX,startY:e.clientY,x:e.clientX,y:e.clientY,moved:false,chord:false};
+  if((mouseButtons&3)===3){pointerDrag.chord=true;pointerDrag.moved=true}
+  if(rightMouseHeld()&&!(previous&2)){
+   const actor=controlledActor();actor.angle+=cameraOrbit;cameraOrbit=0;hoveredNpc=null;dom.viewport.classList.remove('npc-hover');dom.viewport.classList.add('mouse-look');
+   if(state.status==='running'&&dom.viewport.requestPointerLock){try{const promise=dom.viewport.requestPointerLock();promise?.catch(()=>{})}catch{ /* Pointer capture still supports held right-drag. */ }}
+  }
+ }
+ function moveMouse(e){
+  if(!pointerDrag){if(e.target===dom.room||e.target===dom.overlay||e.target===dom.viewport)updateHover(e.clientX,e.clientY);return}
+  const locked=document.pointerLockElement===dom.viewport,dx=locked?e.movementX:e.clientX-pointerDrag.x,dy=locked?e.movementY:e.clientY-pointerDrag.y;
+  pointerDrag.x=e.clientX;pointerDrag.y=e.clientY;pointerDrag.moved ||= locked&&(Math.abs(dx)+Math.abs(dy)>0)||Math.hypot(e.clientX-pointerDrag.startX,e.clientY-pointerDrag.startY)>5;
+  if(rightMouseHeld()){
+   const actor=controlledActor();actor.angle-=dx*.006;cameraOrbit=0;cameraPitch=clamp(cameraPitch+dy*.005,-.08,1.08);if(actor.id!=='you'&&(dx||dy))actor.attacking=false;
+  }else if(mouseButtons&1&&pointerDrag.moved){cameraOrbit-=dx*.006;cameraPitch=clamp(cameraPitch+dy*.005,-.08,1.08)}
+ }
+ function endMouse(e){
+  if(!pointerDrag)return;const click=e.button===0&&!(mouseButtons&2)&&!pointerDrag.moved&&!pointerDrag.chord;
+  mouseButtons&=~(e.button===0?1:e.button===2?2:0);
+  if(click){const rect=dom.viewport.getBoundingClientRect(),id=targetAt(e.clientX-rect.left,e.clientY-rect.top);if(id)selectTarget(id)}
+  if(!rightMouseHeld()){dom.viewport.classList.remove('mouse-look');if(document.pointerLockElement===dom.viewport){intendedUnlock=true;document.exitPointerLock?.()}}
+  if(!mouseButtons){pointerDrag=null;updateHover(e.clientX,e.clientY)}
+ }
  function initEvents(){
   updateBindings();
   $$('[data-mode]').forEach(b=>b.onclick=()=>changeMode(b.dataset.mode));$$('[data-action]').forEach(b=>b.onclick=()=>{action(b.dataset.action);dom.viewport.focus({preventScroll:true})});$$('[data-dialog]').forEach(b=>b.onclick=()=>openDialog(b.dataset.dialog));$('#training-nav').onclick=e=>{e.preventDefault();dom.viewport.scrollIntoView({behavior:'smooth',block:'center'})};$$('[data-guide]').forEach(b=>b.onclick=()=>showGuide(b.dataset.guide));$$('.close-dialog').forEach(b=>b.onclick=()=>closeDialog(b.closest('dialog')));
@@ -264,25 +308,30 @@ import * as THREE from './vendor/three.module.min.js';
    const arrow={arrowup:'w',arrowdown:'s',arrowleft:'a',arrowright:'d'};if(arrow[key]){keys.add(arrow[key]);return}
    if(e.repeat)return;
    if(key==='enter'){if(state.status==='ready')start();else if(state.status==='paused')pause()}
-   if(key==='tab')cycleTarget();if(key==='r')reset(true);if(key==='p')pause();if(key==='escape')action('release');
+   if(key==='tab')cycleTarget();if(key==='r')reset(true);if(key==='p')pause();if(key==='escape'){clearMouseInput();action('release')};
    if(key==='f')action('macro');if(key==='h'||['3','4','6','7','8'].includes(key))action('heal');
   });
   window.addEventListener('keyup',e=>{const key=e.key.toLowerCase();keys.delete(key);const arrow={arrowup:'w',arrowdown:'s',arrowleft:'a',arrowright:'d'};if(arrow[key])keys.delete(arrow[key])});
-  window.addEventListener('blur',()=>{keys.clear();pointerDrag=null;if(state.status==='running')pause()});document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.status==='running')pause()});
+  window.addEventListener('blur',()=>{keys.clear();clearMouseInput();if(state.status==='running')pause()});document.addEventListener('visibilitychange',()=>{if(document.hidden&&state.status==='running')pause()});
   dom.viewport.addEventListener('contextmenu',e=>e.preventDefault());
+  // Mouse events keep both buttons available while pointer lock is active.
+  dom.viewport.addEventListener('mousedown',beginMouse);
+  document.addEventListener('mousemove',moveMouse);document.addEventListener('mouseup',endMouse);
+  document.addEventListener('pointerlockchange',()=>{
+   const wasLocked=pointerLocked;pointerLocked=document.pointerLockElement===dom.viewport;
+   if(pointerLocked){if(!rightMouseHeld()||state.status!=='running'){intendedUnlock=true;document.exitPointerLock?.()}return}
+   if(wasLocked){const escaped=!intendedUnlock&&document.hasFocus()&&!document.hidden;intendedUnlock=false;clearMouseInput();if(escaped&&state.status==='running')action('release')}
+  });
+  document.addEventListener('pointerlockerror',()=>{intendedUnlock=false});
   dom.viewport.addEventListener('pointerdown',e=>{
-   if(e.target!==dom.room&&e.target!==dom.overlay)return;
-   pointerDrag={button:e.button,startX:e.clientX,startY:e.clientY,x:e.clientX,y:e.clientY,moved:false};dom.viewport.setPointerCapture(e.pointerId);dom.viewport.focus({preventScroll:true});
+   if(e.target!==dom.room&&e.target!==dom.overlay&&e.target!==dom.viewport)return;
+   dom.viewport.setPointerCapture(e.pointerId);
+   if(e.pointerType!=='mouse'){e.preventDefault();pointerDrag={button:0,startX:e.clientX,startY:e.clientY,x:e.clientX,y:e.clientY,moved:false,chord:false,touch:true};mouseButtons=1;dom.viewport.focus({preventScroll:true})}
   });
-  dom.viewport.addEventListener('pointermove',e=>{
-   if(!pointerDrag)return;const delta=e.clientX-pointerDrag.x;pointerDrag.moved ||= Math.hypot(e.clientX-pointerDrag.startX,e.clientY-pointerDrag.startY)>5;pointerDrag.x=e.clientX;pointerDrag.y=e.clientY;
-   if(pointerDrag.moved){if(pointerDrag.button===2){const actor=pet()&&state.registration<=0?pet():state.priest;actor.angle-=delta*.006;cameraOrbit=0;if(actor.id!=='you')actor.attacking=false}else if(pointerDrag.button===0)cameraOrbit-=delta*.006}
-  });
-  dom.viewport.addEventListener('pointerup',e=>{
-   if(!pointerDrag)return;
-   if(pointerDrag.button===0&&!pointerDrag.moved){const bounds=dom.viewport.getBoundingClientRect(),x=e.clientX-bounds.left,y=e.clientY-bounds.top;const point=renderPoints.filter(p=>Math.abs(p.x-x)<Math.max(p.width/2,23)&&Math.abs(p.y-y)<35).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0];if(point&&['A','B','C','D','boss'].includes(point.id))selectTarget(point.id)}
-   pointerDrag=null;
-  });dom.viewport.addEventListener('pointercancel',()=>pointerDrag=null);
+  dom.viewport.addEventListener('pointermove',e=>{if(pointerDrag?.touch)moveMouse(e)});
+  dom.viewport.addEventListener('pointerup',e=>{if(pointerDrag?.touch)endMouse({...e,button:0,clientX:e.clientX,clientY:e.clientY})});
+  dom.viewport.addEventListener('pointercancel',()=>{if(document.pointerLockElement!==dom.viewport)clearMouseInput()});
+  dom.viewport.addEventListener('pointerleave',()=>{if(!mouseButtons){hoveredNpc=null;dom.viewport.classList.remove('npc-hover')}});
   dom.viewport.addEventListener('wheel',e=>{if(e.target!==dom.room&&e.target!==dom.overlay)return;e.preventDefault();cameraDistance=clamp(cameraDistance+e.deltaY*.012,8,25)},{passive:false});
   $$('[data-move]').forEach(b=>{b.addEventListener('pointerdown',e=>{e.preventDefault();keys.add(b.dataset.move);b.setPointerCapture(e.pointerId)});b.addEventListener('pointerup',()=>keys.delete(b.dataset.move));b.addEventListener('pointercancel',()=>keys.delete(b.dataset.move))});
   new ResizeObserver(resize).observe(dom.viewport);
@@ -322,7 +371,7 @@ import * as THREE from './vendor/three.module.min.js';
    for(const x of [-7.1,7.1]){box(1.3,2.5,12.2,wallMat,x,1.7,24);box(1.7,.3,12.6,edgeMat,x,3,24);for(const z of [18,24,30]){box(2.1,3.4,2.1,edgeMat,x,1.6,z);box(2.3,.25,2.3,darkMat,x,3.32,z)}}
    // Weapon racks on the flanks of the training ring.
    for(const x of [-22,22]){box(.3,2.3,5,metalMat,x,1.3,-4);for(let n=0;n<5;n++){const sword=box(.11,2.4,.2,edgeMat,x,1.9,-6+n);sword.rotation.z=x>0?-.3:.3;box(.7,.08,.15,metalMat,x,2.5,-6+n)}}
-   const models={};
+   const models={},npcMeshes=[];const raycaster=new T.Raycaster(),pickPoint=new T.Vector2();
    function character(id,kind){const group=new T.Group();scene.add(group);const boss=kind==='boss',priest=kind==='priest',bodyMat=new T.MeshStandardMaterial({color:boss?'#21549c':priest?'#356bb0':'#8a8299',roughness:.7,metalness:priest?.05:.55}),trim=new T.MeshStandardMaterial({color:boss?'#729ece':priest?'#b9bbd9':'#c3bbce',roughness:.7,metalness:.6}),skin=new T.MeshStandardMaterial({color:boss?'#b6b0bc':priest?'#d0c4ba':'#d2afa0',roughness:.95}),cloth=new T.MeshStandardMaterial({color:priest?'#193b85':boss?'#153055':'#3c3747',roughness:1});
     mesh(new T.CylinderGeometry(.65,.8,1.4,8),bodyMat,0,1.8,0,group);if(priest){mesh(new T.ConeGeometry(1.05,2.5,8),cloth,0,1.24,0,group);mesh(new T.SphereGeometry(.61,10,8,0,Math.PI*2,0,Math.PI*.52),cloth,0,3.07,0,group);mesh(new T.SphereGeometry(.59,10,8,2.55,4.38,Math.PI*.4,Math.PI*.55),cloth,0,3.02,0,group)}else{for(const x of [-.4,.4]){box(.45,1.05,.55,bodyMat,x,.67,0,group);box(.48,.34,.85,darkMat,x,.2,.15,group)}}
     mesh(new T.SphereGeometry(.47,12,10),skin,0,2.98,priest?.22:.06,group);
@@ -335,6 +384,7 @@ import * as THREE from './vendor/three.module.min.js';
     for(const x of [-.9,.9]){mesh(new T.DodecahedronGeometry(boss?.67:.5,0),trim,x,2.52,0,group);box(.35,1.1,.4,bodyMat,x,1.96,.04,group);mesh(new T.SphereGeometry(.22,6,6),skin,x,1.35,.09,group)}
     const cape=box(1.12,1.9,.1,cloth,0,1.7,-.63,group);cape.rotation.x=-.17;
     if(priest){mesh(new T.CylinderGeometry(.06,.06,3.4,5),trim,1.02,1.75,.2,group);mesh(new T.OctahedronGeometry(.28),new T.MeshStandardMaterial({color:'#c8ddea',emissive:'#739db9',emissiveIntensity:1}),1.02,3.45,.2,group)}else{box(.18,2.4,.1,trim,1.05,1.55,.3,group);box(.8,.12,.22,trim,1.05,2.6,.3,group);const shield=mesh(new T.CylinderGeometry(.65,.65,.17,6),bodyMat,-1,1.7,.45,group);shield.rotation.x=Math.PI/2;mesh(new T.OctahedronGeometry(.25),trim,-1,1.7,.6,group)}
+    if(!priest)for(const object of group.children){object.userData.npcId=id;npcMeshes.push(object)}
     if(boss)group.scale.setScalar(1.32);const shadow=mesh(new T.CircleGeometry(boss?1.5:1.1,24),new T.MeshBasicMaterial({color:'#050a0b',transparent:true,opacity:.3,depthWrite:false}),0,.055,0,group);shadow.rotation.x=-Math.PI/2;shadow.castShadow=false;
     const ring=mesh(new T.RingGeometry(1.3,1.46,40),new T.MeshBasicMaterial({color:'#c2d796',transparent:true,opacity:.8,side:T.DoubleSide,depthWrite:false}),0,.07,0,group);ring.rotation.x=-Math.PI/2;ring.castShadow=false;
     const barrier=mesh(new T.SphereGeometry(1.75,18,12),new T.MeshBasicMaterial({color:'#8aaad9',transparent:true,opacity:.14,wireframe:true,depthWrite:false}),0,1.8,0,group);barrier.visible=false;
@@ -358,14 +408,20 @@ import * as THREE from './vendor/three.module.min.js';
    let width=1,height=1;
    function setCamera(top){camera=top?mapCamera:followCamera;lastActor=null;mapCamera.position.set(0,85,3);mapCamera.lookAt(target)}
    function updateCamera(){
-    if(tactical)return;const actor=pet()&&state.registration<=0?pet():state.priest,heading=actor.angle+cameraOrbit;
-    const desired=new T.Vector3(actor.x-Math.sin(heading)*cameraDistance,ground(actor.z)+cameraDistance*.48+2,actor.z-Math.cos(heading)*cameraDistance);
+    if(tactical)return;const actor=controlledActor(),changed=lastActor!==actor.id;if(changed){cameraOrbit=0;lastActor=actor.id}
+    const heading=actor.angle+cameraOrbit;
+    const desired=new T.Vector3(actor.x-Math.sin(heading)*cameraDistance,ground(actor.z)+Math.max(.6,cameraDistance*Math.tan(cameraPitch)+2),actor.z-Math.cos(heading)*cameraDistance);
     const look=new T.Vector3(actor.x+Math.sin(heading)*2,ground(actor.z)+2.5,actor.z+Math.cos(heading)*2);
-    if(lastActor!==actor.id){camera.position.copy(desired);lastActor=actor.id;cameraOrbit=0}else camera.position.lerp(desired,.2);
+    if(changed||rightMouseHeld())camera.position.copy(desired);else camera.position.lerp(desired,1-Math.exp(-14*frameDelta));
     camera.lookAt(look);
    }
-   roomView={portraits,resize(w,h){width=w;height=h;renderer.setSize(w,h,false);followCamera.aspect=w/h;followCamera.updateProjectionMatrix();const vertical=35;mapCamera.left=-vertical*w/h;mapCamera.right=vertical*w/h;mapCamera.top=vertical;mapCamera.bottom=-vertical;mapCamera.updateProjectionMatrix()},setCamera,project(e,y=4){const v=new T.Vector3(e.x,ground(e.z)+y,e.z).project(camera);return{x:(v.x*.5+.5)*width,y:(-v.y*.5+.5)*height,visible:v.z>=-1&&v.z<=1&&Math.abs(v.x)<1.15&&Math.abs(v.y)<1.15}},render(){
-    for(const e of [state.priest,...state.adds,state.boss,...state.raid]){const m=models[e.id];m.group.position.set(e.x,ground(e.z),e.z);m.group.rotation.y=e.angle||0;m.group.position.y+=e.moving?Math.sin(visualTime*13)*.06:0;m.ring.visible=e.id===state.target||e.id===state.pet||e.id==='you'&&tactical;m.ring.material.color.set(e.id===state.pet?'#16ff39':e.id==='you'?'#acd6df':e.controlled?'#16ff39':'#ef3224');m.barrier.visible=e.wall>0;m.barrier.rotation.y=visualTime*.3;if(rings[e.id]&&e.id!=='boss'){const r=rings[e.id],rad=e.soothe>0?10:20;r.position.set(e.x,.1,e.z);r.scale.setScalar(rad);r.visible=guided&&!state.combat;r.material.color.set(e.soothe>0?'#a9cc85':'#cfaa77')}}
+   roomView={portraits,pickNpc(x,y){pickPoint.set(x/width*2-1,1-y/height*2);raycaster.setFromCamera(pickPoint,camera);return raycaster.intersectObjects(npcMeshes,false)[0]?.object.userData.npcId||null},bodyBounds(e){
+    const box=new T.Box3().setFromObject(models[e.id].group),points=[];
+    for(const x of [box.min.x,box.max.x])for(const y of [box.min.y,box.max.y])for(const z of [box.min.z,box.max.z]){const v=new T.Vector3(x,y,z).project(camera);if(v.z>=-1&&v.z<=1)points.push({x:(v.x*.5+.5)*width,y:(-v.y*.5+.5)*height})}
+    if(!points.length)return null;const left=Math.min(...points.map(p=>p.x)),right=Math.max(...points.map(p=>p.x)),top=Math.min(...points.map(p=>p.y)),bottom=Math.max(...points.map(p=>p.y));if(right<0||left>width||bottom<0||top>height)return null;
+    const cx=(left+right)/2,cy=(top+bottom)/2,halfWidth=Math.max(27,(right-left)/2),halfHeight=Math.max(32,(bottom-top)/2);return{left:cx-halfWidth,right:cx+halfWidth,top:cy-halfHeight,bottom:cy+halfHeight};
+   },resize(w,h){width=w;height=h;renderer.setSize(w,h,false);followCamera.aspect=w/h;followCamera.updateProjectionMatrix();const vertical=35;mapCamera.left=-vertical*w/h;mapCamera.right=vertical*w/h;mapCamera.top=vertical;mapCamera.bottom=-vertical;mapCamera.updateProjectionMatrix()},setCamera,project(e,y=4){const v=new T.Vector3(e.x,ground(e.z)+y,e.z).project(camera);return{x:(v.x*.5+.5)*width,y:(-v.y*.5+.5)*height,visible:v.z>=-1&&v.z<=1&&Math.abs(v.x)<1.15&&Math.abs(v.y)<1.15}},render(){
+    for(const e of [state.priest,...state.adds,state.boss,...state.raid]){const m=models[e.id];m.group.position.set(e.x,ground(e.z),e.z);m.group.rotation.y=e.angle||0;m.group.position.y+=e.moving?Math.sin(visualTime*13)*.06:0;m.ring.visible=e.id===state.target||e.id===state.pet||e.id===hoveredNpc||e.id==='you'&&tactical;m.ring.material.color.set(e.id===hoveredNpc&&e.id!==state.target?'#ffe394':e.id===state.pet?'#16ff39':e.id==='you'?'#acd6df':e.controlled?'#16ff39':'#ef3224');m.ring.material.opacity=e.id===hoveredNpc&&e.id!==state.target?.55:.8;m.barrier.visible=e.wall>0;m.barrier.rotation.y=visualTime*.3;if(rings[e.id]&&e.id!=='boss'){const r=rings[e.id],rad=e.soothe>0?10:20;r.position.set(e.x,.1,e.z);r.scale.setScalar(rad);r.visible=guided&&!state.combat;r.material.color.set(e.soothe>0?'#a9cc85':'#cfaa77')}}
     tankMarker.visible=guided;
     rings.boss.position.set(state.boss.x,.11,state.boss.z);rings.boss.scale.setScalar(22);rings.boss.visible=guided&&!state.combat;patrol.visible=guided&&!state.combat;castRange.visible=guided&&!state.pet;castRange.position.set(state.priest.x,ground(state.priest.z)+.12,state.priest.z);
     tether.visible=!!state.pet||!!state.cast;const endpoint=pet()||state.adds.find(a=>a.id===state.cast?.target);if(endpoint){const pos=tether.geometry.attributes.position;pos.setXYZ(0,state.priest.x,ground(state.priest.z)+2.4,state.priest.z);pos.setXYZ(1,endpoint.x,ground(endpoint.z)+2.2,endpoint.z);pos.needsUpdate=true;tether.computeLineDistances()}
@@ -383,8 +439,8 @@ import * as THREE from './vendor/three.module.min.js';
   for(const e of [...state.adds,state.boss,state.priest,...state.raid]){
    if(e.id==='you'&&!tactical||e.id.startsWith('raid')||e.id==='partner')continue;
    const selected=e.id===state.target,controlled=e.controlled,label=e.id==='you'?'Your priest':e.id==='boss'?'Instructor Razuvious':'Deathknight Understudy '+e.id;
-   const pt=projection(e,e.id==='boss'?5.7:4.2);if(!pt.visible||!tactical&&distance(actor,e)>43)continue;
-   const font=tactical?(e.id==='boss'?12:11):(selected?15:13);c.font=(selected?'600 ':'')+font+'px Arial';const width=c.measureText(label).width+16;renderPoints.push({id:e.id,x:pt.x,y:pt.y,width});
+   const pt=projection(e,e.id==='boss'?5.7:4.2);if(!tactical&&distance(actor,e)>43)continue;const body=roomView?roomView.bodyBounds(e):(()=>{const center=projection(e,1.5);return{left:center.x-27,right:center.x+27,top:center.y-32,bottom:center.y+32}})();if(!pt.visible&&!body)continue;
+   const font=tactical?(e.id==='boss'?12:11):(selected?15:13);c.font=(selected?'600 ':'')+font+'px Arial';const width=c.measureText(label).width+16;renderPoints.push({id:e.id,x:pt.x,y:pt.y,width,body,marker:e.id!=='boss'&&e.id!=='you'?{x:pt.x,y:pt.y-(tactical?21:30)}:null});if(!pt.visible)continue;
    c.textAlign='center';c.shadowColor='#000';c.shadowBlur=4;c.lineWidth=3;c.strokeStyle='#101014';c.strokeText(label,pt.x,pt.y);c.fillStyle=e.id==='you'?'#c5e5e6':controlled?'#35f14a':'#ed5141';c.fillText(label,pt.x,pt.y);c.shadowBlur=0;
    if(selected){const barWidth=Math.min(width*.7,100);c.fillStyle='#171515bb';c.fillRect(pt.x-barWidth/2,pt.y+5,barWidth,5);c.fillStyle=controlled?'#25c832':'#b7251a';c.fillRect(pt.x-barWidth/2,pt.y+5,barWidth*e.health/100,5)}
    if(e.id!=='boss'&&e.id!=='you'){
@@ -407,6 +463,6 @@ import * as THREE from './vendor/three.module.min.js';
   const actor=pet()&&state.registration<=0?pet():state.priest,p=project(actor);c.save();c.translate(p.x,p.y);c.rotate(-actor.angle);c.beginPath();c.moveTo(0,8);c.lineTo(-5,-5);c.lineTo(0,-2);c.lineTo(5,-5);c.closePath();c.fillStyle='#fff098';c.shadowColor='#000';c.shadowBlur=3;c.fill();c.restore();c.restore();
  }
  function roundedRect(c,x,y,w,h,r){c.beginPath();c.moveTo(x+r,y);c.lineTo(x+w-r,y);c.quadraticCurveTo(x+w,y,x+w,y+r);c.lineTo(x+w,y+h-r);c.quadraticCurveTo(x+w,y+h,x+w-r,y+h);c.lineTo(x+r,y+h);c.quadraticCurveTo(x,y+h,x,y+h-r);c.lineTo(x,y+r);c.quadraticCurveTo(x,y,x+r,y)}
- function frame(now){const dt=Math.min((now-lastFrame)/1000,.05);lastFrame=now;visualTime+=dt;update(dt);if(roomView)roomView.render();else if(fallbackCtx)drawFallback();drawOverlay();drawMinimap();if(now-lastUI>70){updateUI();lastUI=now}requestAnimationFrame(frame)}
+ function frame(now){const dt=Math.min((now-lastFrame)/1000,.05);lastFrame=now;frameDelta=dt;visualTime+=dt;update(dt);if(roomView)roomView.render();else if(fallbackCtx)drawFallback();drawOverlay();drawMinimap();if(now-lastUI>70){updateUI();lastUI=now}requestAnimationFrame(frame)}
  saveStats();reset();initRoom();initEvents();resize();requestAnimationFrame(frame);
 })();

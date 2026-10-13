@@ -10,3 +10,5 @@
 @media(max-width:760px){.pet-action-bar{left:50%}}
 
 .game-viewport{overflow:clip}.checklist li:not(.active) small{display:none}.game-viewport:not(.ready) .quest-tracker>p{display:none}
+
+.game-viewport.npc-hover #room{cursor:pointer}.game-viewport.mouse-look,.game-viewport.mouse-look #room{cursor:none}.game-viewport #room{user-select:none;touch-action:none}
