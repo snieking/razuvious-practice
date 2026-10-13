@@ -6,15 +6,19 @@ Original English World of Warcraft voice recordings by Blizzard Entertainment, f
 | --- | --- | --- | --- |
 | razuvious-taught.mp3 | [RAZ_NAXX_CMMND01.ogg](https://wow.zamimg.com/sound-ids/classic/enus/138/558986/RAZ_NAXX_CMMND01.ogg) | 8855 | Do as I taught you! |
 | razuvious-mercy.mp3 | [RAZ_NAXX_CMMND02.ogg](https://wow.zamimg.com/sound-ids/classic/enus/141/558989/RAZ_NAXX_CMMND02.ogg) | 8856 | Show them no mercy! |
+| razuvious-practice.mp3 | [RAZ_NAXX_CMMND04.ogg](https://wow.zamimg.com/sound-ids/classic/enus/148/558996/RAZ_NAXX_CMMND04.ogg) | 8859 | The time for practice is over! Show me what you have learned! |
+| razuvious-sweep.mp3 | [RAZ_NAXX_JOKE.ogg](https://wow.zamimg.com/sound-ids/classic/enus/142/558990/RAZ_NAXX_JOKE.ogg) | 8861 | Sweep the leg... Do you have a problem with that? |
 | razuvious-warmed.mp3 | [RAZ_NAXX_AGGRO01.ogg](https://wow.zamimg.com/sound-ids/classic/enus/140/558988/RAZ_NAXX_AGGRO01.ogg) | 8852 | Hah hah, I'm just getting warmed up! |
 | razuvious-stand.mp3 | [RAZ_NAXX_AGGRO02.ogg](https://wow.zamimg.com/sound-ids/classic/enus/139/558987/RAZ_NAXX_AGGRO02.ogg) | 8853 | Stand and fight! |
 | razuvious-show.mp3 | [RAZ_NAXX_AGGRO03.ogg](https://wow.zamimg.com/sound-ids/classic/enus/145/558993/RAZ_NAXX_AGGRO03.ogg) | 8854 | Show me what you've got! |
 | razuvious-disappoint.mp3 | [RAZ_NAXX_CMMND03.ogg](https://wow.zamimg.com/sound-ids/classic/enus/147/558995/RAZ_NAXX_CMMND03.ogg) | 8858 | You disappoint me, students! |
 | razuvious-death.mp3 | [RAZ_NAXX_DEATH.ogg](https://wow.zamimg.com/sound-ids/classic/enus/143/558991/RAZ_NAXX_DEATH.ogg) | 8860 | An honorable... death. |
 
-The dialogue and sound-kit mapping was cross-checked against [AzerothCore's Razuvious creature text data](https://github.com/azerothcore/azerothcore-wotlk/blob/master/data/sql/old/db_world/4.x/2021_03_23_00.sql). This verifies the recording identities, rather than asserting current Classic server timing.
+Dialogue events follow the [CMaNGOS Classic encounter script](https://github.com/cmangos/mangos-classic/blob/e24155ae0f62b4b4a662b7156604c0aafbd6dd8e/src/game/AI/ScriptDevAI/scripts/eastern_kingdoms/naxxramas/boss_razuvious.cpp#L30-L80) and its [matching dialogue database](https://github.com/cmangos/mangos-classic/blob/eba3275f3a7c42358f0155e8ccdc2a87600630b7/sql/scriptdev2/scriptdev2.sql#L2458-L2467), as selected after the [source audit](../../../research/razuvious-dialogue.md).
 
-In this trainer, the death recording accompanies attempts ending in a priest, raid member or understudy death, as requested. In the original encounter it is Razuvious's own death line. Nonfatal failures use the students reprimand. Engagement and taunt lines play at their corresponding practice events. Audio starts muted on every page load; the combat log always shows the dialogue.
+Combat engagement chooses equally among taught, mercy, practice-over and sweep-the-leg. A successful understudy Taunt chooses equally among warmed-up, stand-and-fight, show-what-you-have and disappointment. The handoff starts during an existing fight, so its Begin button does not trigger an engagement line. Nonfatal failures do not add a boss quote. Previously triggered dialogue can finish playing.
+
+In this trainer, the death recording accompanies attempts ending in a priest, raid member or understudy death, as requested. The source normally uses the stayed-home line when Razuvious kills a player, and the honorable-death line when Razuvious himself dies. Fatal practice feedback deliberately uses the requested death line. Audio starts muted on every page load; the combat log always shows the dialogue.
 
 ## Spell effects
 

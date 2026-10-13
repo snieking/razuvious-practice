@@ -34,7 +34,7 @@ NPCs have generous selection regions around their bodies and nameplates, with ho
 
 Settings include A/D strafing, control registration delay, handoff timing, optional simulated resists. Guided mode shows the current objective, range circles and prompts. Raid night hides those aids and randomizes the patrol's starting point. Progress stays in the browser.
 
-Sound starts off on every page load. Click **Sound off** in the footer to enable the original English Razuvious recordings. The pull uses “Do as I taught you!” when combat begins. Successful taunts use varied boss responses. Fatal failures play “An honorable... death.”; other failures use “You disappoint me, students!” Quotes also appear in the combat log while muted. Pausing pauses the current voice, and restarting or changing drills stops it.
+Sound starts off on every page load. Click **Sound off** in the footer to enable the original English Razuvious recordings. Dialogue follows the CMaNGOS Classic encounter script: combat engagement selects one of four pull lines, and a successful understudy Taunt selects one of four responses, including "You disappoint me, students!". Starting the handoff and nonfatal failures do not trigger fresh boss dialogue. Fatal failures play "An honorable... death." as requested for the trainer. Quotes also appear in the combat log while muted. Pausing pauses the current voice, and restarting or changing drills stops it.
 
 The same toggle enables the original Classic spell effects: Mind Soothe's application sound, Mind Control's casting and completion sounds, and the understudy's Shield Wall and Taunt. Effects play at the successful action, alongside boss dialogue. Cancelling MC stops its casting sound. Pause, mute and restart apply to all audio.
 
@@ -79,8 +79,11 @@ Room scale, the precise patrol route, detection radii, movement, collision, line
 - [First-hand Classic priest reports about MC and line of sight](https://www.reddit.com/r/classicwow/comments/lbwj6q/mind_control_on_razuvious_breaking_from_los/)
 - [Warcraft Wiki channeling notes](https://warcraft.wiki.gg/wiki/Channeling)
 - [Sage Guide room and ramp positioning reference](https://www.sageguide.net/naxxramas)
+- [CMaNGOS Classic encounter script for boss dialogue events](https://github.com/cmangos/mangos-classic/blob/e24155ae0f62b4b4a662b7156604c0aafbd6dd8e/src/game/AI/ScriptDevAI/scripts/eastern_kingdoms/naxxramas/boss_razuvious.cpp)
 
 The channel LOS rule follows Classic priest reports and channeling documentation. No Blizzard statement specific to Razuvious MC was found. The in-game Field guide includes these sources and the training assumptions.
+
+The [dialogue audit](research/razuvious-dialogue.md) records the source comparison. The trainer adopts the corrected CMaNGOS Classic engagement and Taunt groups, with the requested death-line override for fatal practice failures.
 
 ## Run locally
 

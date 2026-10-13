@@ -1,6 +1,8 @@
 const clips = {
  taught: {file:'taught', text:'Do as I taught you!'},
  mercy: {file:'mercy', text:'Show them no mercy!'},
+ practice: {file:'practice', text:'The time for practice is over! Show me what you have learned!'},
+ sweep: {file:'sweep', text:'Sweep the leg... Do you have a problem with that?'},
  warmed: {file:'warmed', text:"Hah hah, I'm just getting warmed up!"},
  stand: {file:'stand', text:'Stand and fight!'},
  show: {file:'show', text:"Show me what you've got!"},
