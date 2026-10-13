@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#111713">
+  <meta name="description" content="Practice the Razuvious pull and Mind Control handoffs in a playable Classic Era priest trainer.">
+  <title>Razuvious | Mind Control practice</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+<svg class="svg-library" aria-hidden="true"><defs>
+ <symbol id="i-skull" viewBox="0 0 24 24"><path d="M8 20v-4H5v-5a7 7 0 0 1 14 0v5h-3v4H8Z"/><path d="M10 20v-3m4 3v-3"/><circle cx="8.5" cy="11" r="1.5"/><circle cx="15.5" cy="11" r="1.5"/><path d="m11 14 1-2 1 2"/></symbol>
+ <symbol id="i-play" viewBox="0 0 24 24"><path d="m9 5 11 7-11 7V5Z"/></symbol>
+ <symbol id="i-swords" viewBox="0 0 24 24"><path d="m3 3 6 1 12 15-2 2L4 9 3 3Zm18 0-6 1-5 6m-4 6-3 3 2 2 3-3m7-2 5-5M4 15l5 5"/></symbol>
+ <symbol id="i-book" viewBox="0 0 24 24"><path d="M12 6C8 3 4 4 3 4v15c4-1 6 0 9 2 3-2 5-3 9-2V4c-1 0-5-1-9 2Zm0 0v15"/></symbol>
+ <symbol id="i-settings" viewBox="0 0 24 24"><path d="M4 7h16M4 17h16"/><circle cx="8" cy="7" r="3"/><circle cx="16" cy="17" r="3"/></symbol>
+ <symbol id="i-reset" viewBox="0 0 24 24"><path d="M4 10a8 8 0 1 1 1 8M4 4v6h6"/></symbol>
+ <symbol id="i-expand" viewBox="0 0 24 24"><path d="M4 9V4h5m6 0h5v5m0 6v5h-5m-6 0H4v-5"/></symbol>
+ <symbol id="i-volume" viewBox="0 0 24 24"><path d="M4 9h4l5-4v14l-5-4H4V9Zm12-1c3 2 3 6 0 8m3-11c5 4 5 10 0 14"/></symbol>
+ <symbol id="i-check" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol>
+ <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M4 12h15m-5-5 5 5-5 5"/></symbol>
+ <symbol id="i-shield" viewBox="0 0 24 24"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></symbol>
+ <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></symbol>
+</defs></svg>
+<div class="app-shell">
+ <aside class="rail" aria-label="Navigation"><a class="rail-brand" href="#" aria-label="Razuvious practice"><svg><use href="#i-skull"/></svg></a><div class="rail-line"></div><button class="rail-button active" id="training-nav" aria-label="Practice arena" title="Practice arena"><svg><use href="#i-swords"/></svg></button><button class="rail-button" data-dialog="guide" aria-label="Field guide" title="Field guide"><svg><use href="#i-book"/></svg></button><button class="rail-button" data-dialog="settings" aria-label="Settings" title="Settings"><svg><use href="#i-settings"/></svg></button><div class="rail-bottom"><span class="online-dot"></span><span>60</span></div></aside>
+ <div class="page">
+  <header class="topbar"><a class="wordmark" href="#"><svg><use href="#i-skull"/></svg><span>RAID<span class="muted">CRAFT</span></span><span class="wordmark-divider"></span><span class="small muted">Practice makes a clean pull.</span></a><div class="top-right"><span class="era-badge"><span></span> CLASSIC ERA</span><button class="text-button" data-dialog="guide">Field guide <svg><use href="#i-book"/></svg></button></div></header>
+  <main>
+   <section class="heading"><div><div class="eyebrow">NAXXRAMAS <span>/</span> MILITARY QUARTER</div><h1>Instructor Razuvious<span class="title-dot">.</span></h1><p>Keep your mind. Take control.</p></div><div class="session-stats"><div><span id="runs">00</span><small>ATTEMPTS</small></div><div><span id="clean">00</span><small>CLEAN RUNS</small></div><div><span id="best">--</span><small>BEST SCORE</small></div></div></section>
+   <div class="workspace">
+    <section class="arena-panel" aria-label="Interactive practice arena">
+     <div class="arena-toolbar"><div class="mode-tabs" role="tablist" aria-label="Practice scenario"><button class="selected" role="tab" aria-selected="true" data-mode="pull"><span>01</span> The pull</button><button role="tab" aria-selected="false" data-mode="handoff"><span>02</span> The handoff</button></div><div class="arena-tools"><button id="camera-button" title="Switch camera" aria-label="Switch to tactical view">3D <span>↗</span></button><button class="icon-button" data-dialog="settings" title="Practice settings" aria-label="Practice settings"><svg><use href="#i-settings"/></svg></button><button class="icon-button" id="sound-button" title="Enable sound" aria-label="Enable sound" aria-pressed="false"><svg><use href="#i-volume"/></svg></button><button class="icon-button" id="fullscreen-button" title="Fullscreen arena" aria-label="Fullscreen arena"><svg><use href="#i-expand"/></svg></button></div></div>
+     <div class="game-viewport" id="viewport" tabindex="0" aria-label="Game arena. WASD to move, Tab to target, 1 Mind Soothe, 2 Mind Control, 3 Shield Wall, 4 Taunt, 5 attack, F macro, Escape cancels control.">
+      <canvas id="room"></canvas><canvas id="overlay"></canvas><div class="vignette"></div>
+      <div class="scene-top"><span class="scene-location"><span class="live-dot"></span> THE TRAINING GROUNDS</span><span class="scene-mode" id="scene-mode">GUIDED PRACTICE</span></div>
+      <div class="unit-frame player-frame"><span class="unit-portrait priest-portrait">P</span><div><div class="unit-name">You <span>60 PRIEST</span></div><div class="health-bar"><i></i></div><div class="mana-bar"><i id="mana-bar"></i></div><div class="unit-state" id="player-state">Ready to pull</div></div></div>
+      <div class="unit-frame target-frame"><span class="unit-portrait enemy-portrait" id="target-portrait">A</span><div><div class="unit-name" id="target-name">Understudy A <span>60 ELITE</span></div><div class="health-bar enemy-health"><i id="target-health"></i></div><div class="unit-state" id="target-state">Target · 26 yd</div></div></div>
+      <div class="combat-timers" id="combat-timers" hidden><div><span id="tank-name">OTHER PRIEST</span><b id="wall-time">10.0s</b></div><div class="timer-track"><i id="wall-bar"></i></div><small id="timer-detail">Shield Wall · Taunt 10.0s</small></div>
+      <div class="coach-callout" id="coach-callout" hidden><span class="callout-dot"></span><span id="callout-text"></span></div>
+      <div class="castbar" id="castbar" hidden><div><span id="cast-label">Mind Control</span><b id="cast-time">3.0s</b></div><i id="cast-fill"></i></div>
+      <div class="opening-card" id="opening-card"><div class="eyebrow">THE PULL · DRILL 01</div><h2>Patience is a priest skill.</h2><p>Soothe the front adds. Read the patrol.<br>Take control before taking a step.</p><button class="primary" id="begin-button"><svg><use href="#i-play"/></svg> Begin practice <kbd>ENTER</kbd></button><span class="opening-note">No repair bill. As many pulls as it takes.</span></div>
+      <div class="result-card" id="result-card" hidden aria-live="polite"></div>
+      <div class="scene-footer"><div class="legend"><span><i class="you"></i>You</span><span><i class="add"></i>Understudy</span><span><i class="boss"></i>Razuvious</span></div><span id="elapsed">00:00</span></div>
+      <div class="touch-pad" aria-label="Touch movement"><button data-move="w" aria-label="Move forward">↑</button><div><button data-move="a" aria-label="Move left">←</button><button data-move="s" aria-label="Move backward">↓</button><button data-move="d" aria-label="Move right">→</button></div></div>
+     </div>
+     <div class="action-area"><div class="action-caption"><span id="action-owner"><span class="online-dot"></span> PRIEST ABILITIES</span><span>Click an enemy to target <kbd>TAB</kbd></span></div><div class="action-row" id="action-row">
+      <button class="spell" data-action="soothe" title="Mind Soothe: 40 yd range, instant, 15 seconds"><span class="spell-art soothe-art"><b>1</b></span><span>Mind Soothe</span></button>
+      <button class="spell" data-action="mc" title="Mind Control: 20 yd range, 3-second cast"><span class="spell-art mc-art"><b>2</b></span><span>Mind Control</span></button>
+      <span class="action-divider"></span>
+      <button class="spell pet-spell" data-action="wall" title="Shield Wall: 20 seconds, 30-second cooldown"><span class="spell-art wall-art"><b>3</b><i class="cooldown"></i></span><span>Shield Wall</span></button>
+      <button class="spell pet-spell" data-action="taunt" title="Taunt: 5 yd range, 20 seconds, 60-second cooldown"><span class="spell-art taunt-art"><b>4</b><i class="cooldown"></i></span><span>Taunt</span></button>
+      <button class="spell pet-spell" data-action="attack" title="Send your understudy to attack your target"><span class="spell-art attack-art"><b>5</b></span><span>Pet attack</span></button>
+      <span class="action-divider"></span>
+      <button class="macro-button" data-action="macro"><kbd>F</kbd><div><strong>MC macro</strong><small>One press, then wait</small></div><svg><use href="#i-arrow"/></svg></button>
+     </div></div>
+     <div class="controls-strip"><span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Move</span><span><kbd>1</kbd>–<kbd>5</kbd> Abilities</span><span><kbd>ESC</kbd> Break MC</span><span><kbd>R</kbd> Restart</span><button id="pause-button"><svg><use href="#i-clock"/></svg> Pause</button></div>
+    </section>
+    <aside class="drill-panel">
+     <div class="drill-kicker"><span class="eyebrow">YOUR ASSIGNMENT</span><span class="drill-number" id="drill-number">01 / 02</span></div><h2 id="drill-title">Own the pull.</h2><p class="drill-description" id="drill-description">A clean pull starts before Mind Control. Get in range without waking up the room.</p>
+     <div class="difficulty-switch" aria-label="Practice difficulty"><button id="guided-button" class="selected" aria-pressed="true">Guided</button><button id="raid-button" aria-pressed="false">Raid night</button></div>
+     <ol class="checklist" id="checklist"></ol>
+     <div class="priest-note"><span><svg><use href="#i-shield"/></svg> A SECOND OF PATIENCE</span><p id="priest-note">After MC finishes casting, wait for control to register. Moving too soon moves your priest and breaks the channel.</p></div>
+     <div class="combat-log"><div class="section-label">COMBAT LOG <span id="log-dot"></span></div><div id="log" role="log" aria-live="polite"><div class="log-entry"><time>00:00</time><span>The room is quiet. Keep it that way.</span></div></div></div>
+     <button class="restart-button" id="restart-button"><svg><use href="#i-reset"/></svg> Reset this drill <kbd>R</kbd></button>
+    </aside>
+   </div>
+   <section class="bottom-note"><div><svg><use href="#i-book"/></svg><p><strong>Make the mistake here.</strong> Build the timing before your next Naxx night.</p></div><button class="text-button" data-dialog="guide">Mechanics & sources <span>↗</span></button></section>
+  </main><footer class="site-footer"><span>An independent Classic Era practice tool.</span><span>Local progress · No sign-in needed inside the trainer</span></footer>
+ </div>
+</div>
+<dialog id="guide-dialog"><div class="dialog-header"><span class="eyebrow">FIELD GUIDE</span><button class="close-dialog" aria-label="Close field guide">✕</button></div><h2>Know what you're practicing.</h2><div class="guide-tabs"><button data-guide="controls" class="selected">Controls</button><button data-guide="mechanics">Mechanics</button><button data-guide="sources">Sources & limits</button></div><div id="guide-content"></div></dialog>
+<dialog id="settings-dialog"><div class="dialog-header"><span class="eyebrow">PRACTICE SETTINGS</span><button class="close-dialog" aria-label="Close settings">✕</button></div><h2>Set your conditions.</h2><p>Settings apply to your next attempt.</p><label class="setting"><span>Control registration delay<small>Practice the pause after the cast completes.</small></span><select id="latency-setting"><option value="200">200 ms</option><option value="400">400 ms</option><option value="600">600 ms</option></select></label><label class="setting"><span>Handoff warning<small>Time left on the other priest's wall at the start.</small></span><select id="handoff-setting"><option value="10">10 seconds</option><option value="8">8 seconds</option><option value="6">6 seconds</option></select></label><label class="setting"><span>Start with Mark of the Wild<small>Practice clearing the buff with the MC macro.</small></span><input id="mark-setting" type="checkbox"></label><label class="setting"><span>Simulated spell resists<small>10% per Soothe or MC cast. A training rate, not a live-game claim.</small></span><input id="resist-setting" type="checkbox"></label><button class="primary" id="save-settings">Save settings</button></dialog>
+<script type="module" src="game.js"></script>
+</body></html>
