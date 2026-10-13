@@ -78,3 +78,62 @@ export class BossVoice {
   this.enabled=false;this.player.muted=true;this.stop();this.onError?.();
  }
 }
+
+const spellFiles={cast:'shadow-precast',release:'shadow-cast',soothe:'mind-soothe',wall:'shield-wall',taunt:'taunt'};
+
+// Spell effects use separate tracks so a cast, its impact and a boss yell can overlap.
+export class SpellSounds {
+ constructor(players,onError) {
+  this.enabled=false;this.paused=false;this.onError=onError;
+  this.tracks=Object.fromEntries(Object.entries(spellFiles).map(([id,file])=>{
+   const player=players[id],track={player,file,active:false,revision:0};
+   player.muted=true;player.preload='none';player.volume=.55;
+   player.addEventListener('ended',()=>{if(player.ended)track.active=false});
+   player.addEventListener('error',()=>{if(this.enabled&&track.active)this.unavailable()});
+   return [id,track];
+  }));
+ }
+ setEnabled(enabled) {
+  this.stop();this.enabled=enabled;
+  for(const track of Object.values(this.tracks)) {
+   const {player,file}=track;player.muted=!enabled;
+   if(!enabled)continue;
+   // Unlock every effect inside the same opt-in gesture, silently.
+   player.src='assets/audio/spell-'+file+'.mp3';player.muted=true;
+   this.requestPlay(track,()=>{player.pause();player.currentTime=0;player.muted=false});
+  }
+ }
+ play(id,{loop=false}={}) {
+  if(!this.enabled||this.paused)return;
+  const track=this.tracks[id];if(!track)return;
+  const {player,file}=track;
+  player.pause();player.src='assets/audio/spell-'+file+'.mp3';player.currentTime=0;
+  player.muted=false;player.loop=loop;track.active=true;this.requestPlay(track);
+ }
+ requestPlay(track,onStarted) {
+  const revision=++track.revision;
+  try {
+   Promise.resolve(track.player.play()).then(()=>{
+    if(revision===track.revision)onStarted?.();
+   }).catch(error=>{
+    if(revision===track.revision&&error.name!=='AbortError')this.unavailable();
+   });
+  } catch {if(revision===track.revision)this.unavailable();}
+ }
+ stop(id) {
+  const tracks=id?[this.tracks[id]].filter(Boolean):Object.values(this.tracks);
+  for(const track of tracks){++track.revision;track.player.pause();track.player.currentTime=0;track.player.loop=false;track.active=false}
+  if(!id)this.paused=false;
+ }
+ pause() {
+  this.paused=true;
+  for(const track of Object.values(this.tracks)){++track.revision;track.player.pause()}
+ }
+ resume() {
+  this.paused=false;
+  if(this.enabled)for(const track of Object.values(this.tracks))if(track.active&&!track.player.ended){track.player.muted=false;this.requestPlay(track)}
+ }
+ unavailable() {
+  this.setEnabled(false);this.onError?.();
+ }
+}

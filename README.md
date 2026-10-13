@@ -36,6 +36,8 @@ Settings include A/D strafing, control registration delay, handoff timing, optio
 
 Sound starts off on every page load. Click **Sound off** in the footer to enable the original English Razuvious recordings. The pull uses “Do as I taught you!” when combat begins. Successful taunts use varied boss responses. Fatal failures play “An honorable... death.”; other failures use “You disappoint me, students!” Quotes also appear in the combat log while muted. Pausing pauses the current voice, and restarting or changing drills stops it.
 
+The same toggle enables the original Classic spell effects: Mind Soothe's application sound, Mind Control's casting and completion sounds, and the understudy's Shield Wall and Taunt. Effects play at the successful action, alongside boss dialogue. Cancelling MC stops its casting sound. Pause, mute and restart apply to all audio.
+
 ## Macro
 
 Each drill opens with the exact macro and instructions. Copy it into WoW and bind it to the same key used in the trainer.
@@ -103,3 +105,5 @@ Three.js is distributed under the MIT license. Its license is included in `docs/
 Spell icons are Blizzard game assets. The Mind Soothe and Taunt icons use the supplied reference images; other icons come from Wowhead. World of Warcraft belongs to Blizzard Entertainment. This is an independent practice tool.
 
 Boss voice recordings are the original Blizzard audio, converted to MP3 from the Classic Sounds list on Wowhead. [Recording sources and event mapping](docs/assets/audio/SOURCES.md) list each clip. The trainer uses Razuvious's own death line for fatal practice failures at the user's request.
+
+Spell effects use the original recordings listed for the Classic priest spells and the understudy versions of Shield Wall and Taunt. Their source files and sound-kit IDs are included in the same recording sources.
