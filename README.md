@@ -34,6 +34,8 @@ NPCs have generous selection regions around their bodies and nameplates, with ho
 
 Settings include A/D strafing, control registration delay, handoff timing, optional simulated resists. Guided mode shows the current objective, range circles and prompts. Raid night hides those aids and randomizes the patrol's starting point. Progress stays in the browser.
 
+Sound starts off on every page load. Click **Sound off** in the footer to enable the original English Razuvious recordings. The pull uses “Do as I taught you!” when combat begins. Successful taunts use varied boss responses. Fatal failures play “An honorable... death.”; other failures use “You disappoint me, students!” Quotes also appear in the combat log while muted. Pausing pauses the current voice, and restarting or changing drills stops it.
+
 ## Macro
 
 Each drill opens with the exact macro and instructions. Copy it into WoW and bind it to the same key used in the trainer.
@@ -99,3 +101,5 @@ Sniekin-Pyrewood Village.
 Three.js is distributed under the MIT license. Its license is included in `docs/vendor/THREE-LICENSE.txt`.
 
 Spell icons are Blizzard game assets. The Mind Soothe and Taunt icons use the supplied reference images; other icons come from Wowhead. World of Warcraft belongs to Blizzard Entertainment. This is an independent practice tool.
+
+Boss voice recordings are the original Blizzard audio, converted to MP3 from the Classic Sounds list on Wowhead. [Recording sources and event mapping](docs/assets/audio/SOURCES.md) list each clip. The trainer uses Razuvious's own death line for fatal practice failures at the user's request.
