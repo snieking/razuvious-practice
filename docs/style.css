@@ -18,3 +18,5 @@
 
 /* Classic aura icons and remaining time below the target frame. */
 .target-auras{gap:7px;margin-top:7px;padding-bottom:10px}.target-auras .wow-buff{display:block;width:25px;height:25px;border:2px solid #797368;box-shadow:0 0 0 1px #09070c,inset 0 0 0 1px #dac9a855;border-radius:2px;overflow:visible}.target-auras .wow-debuff{border-color:#b8312b}.target-auras .aura-sweep{position:absolute;inset:0;pointer-events:none}.target-auras b{bottom:-13px;right:0;left:0;text-align:center;font:bold 10px/12px Arial,sans-serif;color:#fff3d5;text-shadow:1px 1px 2px #000,-1px -1px 1px #000;z-index:1}.macro-usage li strong{color:#ffe4a1;font-weight:600}
+
+.session-summary{display:flex;flex-direction:column;align-items:flex-end;gap:3px;flex-shrink:0}.trainer-credit{font-size:8px;line-height:1.2;color:#8d8068;white-space:nowrap}
