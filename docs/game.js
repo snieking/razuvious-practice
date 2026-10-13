@@ -9,13 +9,21 @@ import * as THREE from './vendor/three.module.min.js';
  function readSaved(key,fallback){try{return JSON.parse(localStorage.getItem(key))||fallback}catch{return fallback}}
  function persist(key,value){try{localStorage.setItem(key,JSON.stringify(value))}catch{}}
  const stats=readSaved('razuvious.stats.v1',{runs:0,clean:0,best:0});
- const settings={latency:200,handoff:10,mark:false,resists:false,movement:'classic',...readSaved('razuvious.settings.v1',{})};
+ const settings={latency:1000,handoff:10,resists:false,movement:'classic',...readSaved('razuvious.settings.v1',{})};
+ settings.latency=[800,1000,1200].includes(Number(settings.latency))?Number(settings.latency):1000;
  const defaultBindings={soothe:'1',macro:'5'},savedBindings=readSaved('razuvious.bindings.v1',{});
  let bindings=Object.fromEntries(Object.entries(defaultBindings).map(([name,key])=>[name,savedBindings[name]||key]));
- const MC_MACRO='#showtooltip Mind Control\n/cancelaura Mark of the Wild\n/cancelaura Gift of the Wild\n/cast [nopet,harm] Mind Control\n/petattack\n/cast Shield Wall\n/cast Taunt';
+ const MC_MACRO="#showtooltip\n/cast [nopet,harm] Mind Control\n/targetexact [pet] Instructor Razuvious\n/targetexact [pet] Grand Widow Faerlina\n/petattack\n/cast Shield Wall\n/cast Taunt\n/cast Widow's Embrace";
+ const rampSides=[-7.1,7.1];
+ // Cover and movement use the same wall footprints as the rendered room.
+ const rampWalls=rampSides.flatMap(x=>[{x,z:24,w:1.3,d:12.2,h:2.5,y:1.7,angle:0,kind:'rail'},...[18,24,30].map(z=>({x,z,w:2.1,d:2.1,h:3.4,y:1.6,angle:0,kind:'pillar'}))]);
+ const outerWalls=Array.from({length:32},(_,n)=>{const angle=n/32*Math.PI*2;return{x:Math.sin(angle)*25.6,z:-6+Math.cos(angle)*25.6,w:5.5,d:1.8,h:6.8,y:3.25,angle,n}}).filter(w=>w.z<=15);
+ const roomWalls=[...rampWalls,...outerWalls];
+ const auraAssets={soothe:'assets/soothe.png',taunt:'assets/taunt-debuff.jpg',exhaustion:'assets/exhaustion.jpg',wall:'assets/wall.jpg'};
+ const auraImages={};
  const configs={
-  pull:{title:'Own the pull.',description:'Soothe your add, take control, then bring Razuvious behind the ramp corner before he can shout at the raid.',opening:'Patience is a priest skill.',intro:'Soothe A from the left side of the ramp. Read the clockwise patrol before approaching.',steps:[['Soothe your add','Select A on the left, then use Mind Soothe.'],['Find your window','Get within 20 yd while the boss is away.'],['Let control register','Use the macro. Wait for the camera and pet frame.'],['Use the same macro','Target Razuvious. The macro uses Wall, then Taunt.'],['Hide the boss','Keep Razuvious out of sight of the raid on the left.']]},
-  handoff:{title:'Take the next turn.',description:'Your partner has the boss behind the ramp corner. Take over without exposing the raid to Disrupting Shout.',opening:'Your partner is counting on you.',intro:'Your partner holds A behind the left ramp corner. B is free for your handoff.',steps:[['Choose the next add','Understudy A is occupied. Take B.'],['Establish control','Press the macro. Wait for the camera and pet frame.'],['Prepare the handoff','Target Razuvious. Close to 5 yd.'],['Take over safely','Use the same macro for Wall and Taunt.'],['Keep the raid covered','Hold the boss behind the ramp corner.']]}
+  pull:{title:'Own the pull.',description:'Soothe your add, take control, then bring Razuvious behind the ramp corner before he can shout at the raid.',opening:'Patience is a priest skill.',intro:'Soothe A from the left side of the ramp. Read the clockwise patrol before approaching.',steps:[['Soothe your add','Select A on the left, then use Mind Soothe.'],['Find your window','Get within 20 yd while the boss is away.'],['Let control register','After the 3s cast, stand still for about 1s.'],['Use the same macro','It targets Razuvious and uses Wall, then Taunt.'],['Hide the boss','Keep Razuvious out of sight of the raid up the ramp.']]},
+  handoff:{title:'Take the next turn.',description:'Choose an available understudy and take over before your partner loses protection. Keep the boss hidden from the raid up the ramp.',opening:'Your partner is counting on you.',intro:'A is your partner\'s tank. Two other adds have Mind Exhaustion. Check their debuffs and choose the available one.',steps:[['Choose an available add','Avoid your partner\'s add and any with Mind Exhaustion.'],['Establish control','After the 3s cast, stand still for about 1s.'],['Prepare the handoff','The macro targets Razuvious. Close to 5 yd.'],['Take over safely','Use the same macro for Wall and Taunt.'],['Keep the raid covered','Hold the boss behind the ramp corner.']]}
  };
  let mode='pull', guided=true, sound=false, audioContext, tactical=false;
  let state, keys=new Set(), lastFrame=performance.now(), visualTime=0, lastUI=0;
@@ -25,23 +33,28 @@ import * as THREE from './vendor/three.module.min.js';
  function newAdd(id,x,z){return{id,x,z,start:{x,z},health:100,soothe:0,wall:0,wallCD:0,tauntCD:0,immune:0,controlled:false,attacking:false,angle:Math.PI,moving:false}}
  function reset(startNow=false){
   keys.clear();clearMouseInput();cameraOrbit=0;cameraPitch=Math.atan(.48);const handoff=mode==='handoff';
-  state={status:'ready',t:0,priest:{id:'you',x:-11,z:handoff?27:31,angle:Math.PI,health:100,mana:100},raid:[{id:'raid1',x:-13,z:28.5,angle:Math.PI,health:100},{id:'raid2',x:-15,z:31,angle:Math.PI,health:100},{id:'partner',x:-11.5,z:29.5,angle:Math.PI,health:100}],adds:[newAdd('A',-10,5),newAdd('B',10,5),newAdd('C',-10,-17),newAdd('D',10,-17)],boss:{id:'boss',x:8,z:-16,angle:0,health:100},target:handoff?'B':'A',pet:null,cast:null,registration:0,channel:0,gcd:0,combat:false,aggro:null,taunt:0,partner:0,partnerChannel:0,steps:[false,false,false,false,false],penalties:0,notes:[],logs:[],toast:null,hold:0,coverState:null,wallAtTaunt:0,handoffMargin:null,mark:!!settings.mark,latency:settings.latency/1000,resists:!!settings.resists,warning:false,shout:handoff?8:25,shoutCast:0,history:[],patrolOffset:Math.random()*(guided?6:40),challenge:!guided,success:false};
-  if(handoff){const a=state.adds[0],b=state.adds[1];a.x=-6.3;a.z=15;a.wall=Number(settings.handoff);a.controlled=true;b.x=-10;b.z=16.7;state.boss.x=-3.1;state.boss.z=15;state.boss.angle=-Math.PI/2;state.combat=true;state.aggro='A';state.taunt=Number(settings.handoff);state.partner=Number(settings.handoff);state.partnerChannel=Number(settings.handoff)+2.4;state.steps[0]=true}
+  state={status:'ready',t:0,priest:{id:'you',x:-11,z:handoff?27:31,angle:Math.PI,health:100,mana:100},raid:[{id:'raid1',x:-13,z:33,angle:Math.PI,health:100},{id:'raid2',x:-15,z:33,angle:Math.PI,health:100},{id:'partner',x:-11.5,z:34,angle:Math.PI,health:100}],adds:[newAdd('A',-10,5),newAdd('B',10,5),newAdd('C',-10,-17),newAdd('D',10,-17)],boss:{id:'boss',x:8,z:-16,angle:0,health:100},target:'A',pet:null,cast:null,registration:0,channel:0,gcd:0,combat:false,aggro:null,taunt:0,partner:0,partnerChannel:0,steps:[false,false,false,false,false],penalties:0,notes:[],logs:[],toast:null,hold:0,coverState:null,wallAtTaunt:0,handoffMargin:null,mark:false,latency:settings.latency/1000,resists:!!settings.resists,warning:false,shout:handoff?8:25,shoutCast:0,history:[],patrolOffset:Math.random()*(guided?6:40),challenge:!guided,success:false};
+  if(handoff){
+   const a=state.adds[0],candidates=state.adds.slice(1),available=Math.floor(Math.random()*candidates.length);
+   a.x=-6.3;a.z=15;a.wall=Number(settings.handoff);a.controlled=true;
+   candidates.forEach((add,i)=>{add.x=[-10,-13,-16][i];add.z=[16.7,16,16.5][i];add.immune=i===available?0:20+Math.floor(Math.random()*31)});
+   state.target=candidates.find(add=>add.immune>0).id;state.boss.x=-3.1;state.boss.z=15;state.boss.angle=-Math.PI/2;state.combat=true;state.aggro='A';state.taunt=Number(settings.handoff);state.partner=Number(settings.handoff);state.partnerChannel=Number(settings.handoff)+2.4;
+  }
   dom.result.hidden=true;dom.result.classList.remove('failed');dom.opening.hidden=false;dom.viewport.classList.add('ready');$('#pause-button').innerHTML=icon('clock')+' Pause';$('.paused-badge')?.remove();
   const config=configs[mode];$('#drill-title').textContent=config.title;$('#drill-description').textContent=config.description;$('#drill-number').textContent=(handoff?'02':'01')+' / 02';
   renderOpening();
   $('#checklist').innerHTML=config.steps.map(([title,detail])=>'<li><div><strong>'+title+'</strong><small>'+detail+'</small></div></li>').join('');
-  $('#priest-note').textContent=handoff?'Shield Wall first, then Taunt. Start MC early enough to finish the cast and the registration pause before your partner needs you.':'After MC finishes casting, wait for control to register. Moving too soon moves your priest and breaks the channel.';
-  dom.log.innerHTML='';addLog(handoff?'Your partner holds A. Understudy B is free.':'The room is quiet. Keep it that way.');updateUI();
+  $('#priest-note').textContent=handoff?'Mind Exhaustion prevents MC for 60s after an add is released. Choose an available add, then allow 3s to cast plus about 1s to register.':'After the 3s MC cast, stand still for about 1s. Wait for the camera and pet frame. Moving too soon breaks control.';
+  dom.log.innerHTML='';addLog(handoff?'Your partner holds A. Check Mind Exhaustion before choosing the next add.':'The room is quiet. Keep it that way.');updateUI();
   if(startNow)start();
  }
  function renderOpening(){
-  const handoff=mode==='handoff',config=configs[mode],target=handoff?'B':'A';
-  dom.opening.innerHTML='<div class="eyebrow">'+(handoff?'THE HANDOFF · DRILL 02':'THE PULL · DRILL 01')+'</div><h2>Use this Mind Control macro.</h2><p class="opening-intro">'+config.intro+'</p><div class="macro-briefing"><section><strong>Copy into WoW</strong><pre class="macro-code opening-macro" id="opening-macro"></pre><button class="copy-macro" id="opening-copy">Copy macro</button></section><section class="macro-usage"><strong>This is the button to press <kbd>'+bindings.macro+'</kbd></strong><ol><li>Target understudy '+target+' and press <kbd>'+bindings.macro+'</kbd> once to cast Mind Control.</li><li>Stay still for the 3-second cast and the registration pause. Wait for the camera to shift and the pet frame to appear.</li><li>Target Razuvious with <kbd>Tab</kbd> or a click, then press <kbd>'+bindings.macro+'</kbd> again. It sends the add in and uses Shield Wall, then Taunt. Repeat when the boss is within 5 yd.</li></ol><p>Bind this macro to the same key in WoW. It does not target the boss for you.</p></section></div><button class="primary" id="begin-button">'+icon('play')+' Begin practice <kbd>ENTER</kbd></button>';
+  const handoff=mode==='handoff',config=configs[mode];
+  dom.opening.innerHTML='<div class="eyebrow">'+(handoff?'THE HANDOFF · DRILL 02':'THE PULL · DRILL 01')+'</div><h2>Use this Mind Control macro.</h2><p class="opening-intro">'+config.intro+'</p><div class="macro-briefing"><section><strong>Copy into WoW</strong><pre class="macro-code opening-macro" id="opening-macro"></pre><button class="copy-macro" id="opening-copy">Copy macro</button></section><section class="macro-usage"><strong>This is the button to press <kbd>'+bindings.macro+'</kbd></strong><ol><li>'+(handoff?'Check the adds\' debuffs. Target one without Mind Exhaustion that your partner is not controlling.':'Target understudy A. Use Mind Soothe before approaching.')+' Press <kbd>'+bindings.macro+'</kbd> once to cast Mind Control.</li><li>Stay still for the <strong>3-second cast, then about 1 more second</strong> while control registers. Wait for the camera to shift and the pet frame to appear.</li><li>Press <kbd>'+bindings.macro+'</kbd> again. The macro targets Razuvious, sends the add in and uses Shield Wall, then Taunt. Repeat when the boss is within 5 yd.</li></ol><p>Bind this macro to the same key in WoW. The Faerlina lines do nothing in this encounter.</p></section></div><button class="primary" id="begin-button">'+icon('play')+' Begin practice <kbd>ENTER</kbd></button>';
   $('#opening-macro').textContent=MC_MACRO;$('#opening-copy').onclick=()=>copyMacro($('#opening-copy'));$('#begin-button').addEventListener('click',start);
  }
  async function copyMacro(button){try{await navigator.clipboard.writeText(MC_MACRO);button.textContent='Copied'}catch{button.textContent='Select and copy the macro above'}}
- function start(){if(state.status!=='ready')return;state.status='running';dom.opening.hidden=true;dom.viewport.classList.remove('ready');stats.runs++;saveStats();addLog(mode==='pull'?'Soothe A from the left side. Watch the clockwise patrol before stepping down.':'Partner: "My wall is fading. Keep him behind the corner."');toast(mode==='pull'?'A is selected. Use '+bindings.soothe+' to Soothe, then '+bindings.macro+' for the MC macro.':'B is free. Press '+bindings.macro+' for MC, then wait for the camera and pet frame.',false,5);dom.viewport.focus({preventScroll:true});tone(440,.09)}
+ function start(){if(state.status!=='ready')return;state.status='running';dom.opening.hidden=true;dom.viewport.classList.remove('ready');stats.runs++;saveStats();addLog(mode==='pull'?'Soothe A from the left side. Watch the clockwise patrol before stepping down.':'Partner: "My wall is fading. Keep him behind the corner."');toast(mode==='pull'?'A is selected. Use '+bindings.soothe+' to Soothe, then '+bindings.macro+' for the MC macro.':'Check Mind Exhaustion. Choose an available add, then use '+bindings.macro+' for MC.',false,5);dom.viewport.focus({preventScroll:true});tone(440,.09)}
  function saveStats(){persist('razuvious.stats.v1',stats);$('#runs').textContent=pad(stats.runs);$('#clean').textContent=pad(stats.clean);$('#best').textContent=stats.best||'--'}
  function addLog(message,type=''){const entry={t:state.t,message,type};state.logs.push(entry);const div=document.createElement('div');div.className='log-entry '+type;const time=document.createElement('time');time.textContent=clock(state.t);const span=document.createElement('span');span.textContent=message;div.append(time,span);dom.log.append(div);if(dom.log.childElementCount>40)dom.log.firstChild.remove();dom.log.scrollTop=dom.log.scrollHeight;}
  function toast(message,error=false,duration=3){state.toast={message,error,until:state.t+duration};if(error)tone(150,.09);updateUI()}
@@ -54,24 +67,32 @@ import * as THREE from './vendor/three.module.min.js';
  function movementInput(){const strafeKeys=settings.movement==='strafe'||rightMouseHeld();return{forward:(keys.has('w')||(mouseButtons&3)===3?1:0)-(keys.has('s')?1:0),strafe:(keys.has('e')||strafeKeys&&keys.has('d')?1:0)-(keys.has('q')||strafeKeys&&keys.has('a')?1:0),turn:strafeKeys?0:(keys.has('a')?1:0)-(keys.has('d')?1:0)}}
  function selectTarget(id){state.target=id;updateUI();tone(350,.035)}
  function cycleTarget(){if(state.pet&&state.target===state.pet){selectTarget('boss');return}const order=state.pet?['boss',...state.adds.map(a=>a.id)]:mode==='handoff'?['B','C','D','A','boss']:['A','B','boss','C','D'];selectTarget(order[(order.indexOf(state.target)+1)%order.length])}
- function los(a,b){
-  // The two ramp rails are the room's cover. This is an approximate collision model.
-  for(const x of [-7.1,7.1]){if(Math.abs(a.x-b.x)<.001)continue;const u=(x-a.x)/(b.x-a.x);if(u>0&&u<1){const z=a.z+(b.z-a.z)*u;if(z>18&&z<30)return false}}
-  return true;
+ function wallPoint(point,wall){const dx=point.x-wall.x,dz=point.z-wall.z,c=Math.cos(wall.angle),s=Math.sin(wall.angle);return{x:dx*c-dz*s,z:dx*s+dz*c}}
+ function wallBlocks(a,b,wall){
+  const from=wallPoint(a,wall),to=wallPoint(b,wall);let enter=0,exit=1;
+  for(const [axis,half] of [['x',wall.w/2],['z',wall.d/2]]){
+   const delta=to[axis]-from[axis];
+   if(Math.abs(delta)<1e-8){if(Math.abs(from[axis])>half)return false;continue}
+   const t1=(-half-from[axis])/delta,t2=(half-from[axis])/delta;
+   enter=Math.max(enter,Math.min(t1,t2));exit=Math.min(exit,Math.max(t1,t2));if(enter>exit)return false;
+  }
+  return exit>1e-5&&enter<1-1e-5;
  }
+ function los(a,b){return !roomWalls.some(wall=>wallBlocks(a,b,wall))}
  function manaUsers(){return [state.priest,...state.raid]}
  function raidCovered(){return manaUsers().every(u=>!los(u,state.boss))}
  function shoutTargets(){return manaUsers().filter(u=>u.health>0&&los(u,state.boss)&&distance(u,state.boss)<=45)}
- function usablePoint(x,z){if(x<-28||x>28||z<-29||z>35)return false;for(const rx of [-7.1,7.1])if(Math.abs(x-rx)<.8&&z>18&&z<30)return false;return true}
+ function usablePoint(x,z){if(x<-28||x>28||z<-29||z>35)return false;return !roomWalls.some(wall=>{const p=wallPoint({x,z},wall);return Math.abs(p.x)<wall.w/2+.35&&Math.abs(p.z)<wall.d/2+.35})}
  function stepEntity(e,dx,dz,speed,dt){const l=Math.hypot(dx,dz);if(!l){e.moving=false;return}dx/=l;dz/=l;const x=e.x+dx*speed*dt,z=e.z+dz*speed*dt;if(usablePoint(x,e.z))e.x=x;if(usablePoint(e.x,z))e.z=z;e.angle=Math.atan2(dx,dz);e.moving=true}
  function action(name){
   if(state.status!=='running'){if(state.status==='ready')toast('Begin practice to use abilities.');return}
   state.history.push({t:state.t,action:name,target:state.target});
   if(name==='release'){if(state.pet||state.cast||state.registration>0)breakControl('You pressed Escape and cancelled Mind Control.');return}
   if(name==='macro'){
-   if(state.mark){state.mark=false;addLog('Macro removed Mark of the Wild.','success')}
    if(!state.pet){action('mc');return}
-   // The supplied macro does not change target. Both pet spells are off the GCD.
+   if(state.registration>0){toast('Stand still for about 1s after the cast. Wait for the pet frame.',true,2);return}
+   // Faerlina is absent, so her /targetexact line leaves Razuvious selected.
+   selectTarget('boss');
    action('attack');action('wall');action('taunt');return;
   }
   if(['soothe','mc','heal'].includes(name)&&state.pet){breakControl('You cast a priest spell during Mind Control. Use the MC macro while channeling.');return}
@@ -99,7 +120,6 @@ import * as THREE from './vendor/three.module.min.js';
    if(target.immune>0){toast('Mind Exhaustion: '+target.immune.toFixed(1)+'s before this add can be controlled again.',true);return}
    if(distance(state.priest,target)>20){toast('Out of range. Mind Control needs 20 yd or less.',true);return}
    if(!los(state.priest,target)){toast('No line of sight to the understudy. Move around the ramp wall.',true);return}
-   if(state.mark){penalty('You cast MC with Mark of the Wild still active.',10);addLog('Mark of the Wild is still active. Your macro can remove it.','error')}
    state.steps[mode==='pull'?1:0]=true;state.cast={target:target.id,left:3};state.gcd=1.5;state.priest.mana-=10;keys.clear();state.priest.angle=Math.atan2(target.x-state.priest.x,target.z-state.priest.z);addLog('Casting Mind Control on '+target.id+'.');tone(270,.2);return;
   }
   if(name==='wall'){
@@ -112,7 +132,7 @@ import * as THREE from './vendor/three.module.min.js';
    p.attacking=true;toast('Understudy moving to attack. Taunt requires melee range.',false,2);return;
   }
   if(name==='taunt'){
-   if(state.target!=='boss'){toast('Target Instructor Razuvious first. The macro does not target him for you.',true);return}
+   if(state.target!=='boss'){toast('Use the MC macro to target Instructor Razuvious.',true);return}
    if(p.tauntCD>0){toast('Taunt cooldown: '+p.tauntCD.toFixed(1)+'s.',true);return}
    if(distance(p,state.boss)>5){toast('Too far away. Move your understudy or press the macro to send it in. Taunt needs 5 yd.',true);return}
    if(p.wall<=0){fail('Taunt without Shield Wall.','Protect your understudy before Taunt. The boss can kill an unprotected add in a few hits.');return}
@@ -123,7 +143,8 @@ import * as THREE from './vendor/three.module.min.js';
    state.aggro=p.id;state.taunt=20;p.tauntCD=60;p.attacking=true;state.steps[2]=true;state.steps[3]=true;state.hold=0;state.partnerChannel=Math.min(state.partnerChannel,1.2);addLog(p.id+' taunted Razuvious'+(margin!==null?' with '+Math.max(0,margin).toFixed(1)+'s left.':'.'),'success');toast(raidCovered()?'You have the boss. Keep him hidden from the raid. Use the same macro.':'You have the boss. Move your add behind the left ramp corner to hide Razuvious.',false,5);tone(760,.15);return;
   }
  }
- function breakControl(reason){const p=pet();if(p){p.controlled=false;p.immune=45;p.attacking=false}state.pet=null;state.cast=null;state.registration=0;state.channel=0;addLog('Mind Control broken.','error');fail('Mind Control broke.',reason)}
+ function releaseAdd(add){add.controlled=false;add.immune=60;add.attacking=false}
+ function breakControl(reason){const p=pet();if(p)releaseAdd(p);state.pet=null;state.cast=null;state.registration=0;state.channel=0;addLog('Mind Control broken.','error');fail('Mind Control broke.',reason)}
  function fail(title,reason){if(state.status!=='running')return;state.status='failed';keys.clear();clearMouseInput();state.success=false;tone(170,.35);addLog(title,'error');state.toast=null;dom.result.hidden=false;dom.result.classList.add('failed');dom.result.innerHTML='<div class="eyebrow">ATTEMPT '+pad(stats.runs)+'</div><h2>'+title+'</h2><p>'+reason+'</p><div class="result-detail">'+(mode==='pull'?'Soothe → position → MC → wait → Wall → Taunt':'MC → wait → boss target → Wall → Taunt')+'</div><button class="primary" id="retry-button">'+icon('reset')+' Try again <kbd>R</kbd></button><button class="secondary-result" id="review-button">Review the field guide</button>';$('#retry-button').onclick=()=>reset(true);$('#review-button').onclick=()=>openDialog('guide');updateUI()}
  function success(){if(state.status!=='running')return;state.status='success';state.success=true;keys.clear();clearMouseInput();const score=clamp(100-state.penalties,0,100);if(score>=90)stats.clean++;stats.best=Math.max(stats.best,score);saveStats();tone(660,.2);addLog('Clean control. Drill complete.','success');dom.result.hidden=false;dom.result.classList.remove('failed');const detail=mode==='handoff'?'Taunt landed '+Math.max(0,state.handoffMargin).toFixed(1)+'s before the outgoing wall expired.':'Safe approach, registered control, Shield Wall before Taunt.';dom.result.innerHTML='<div class="eyebrow">'+(score>=90?'CLEAN RUN':'DRILL COMPLETE')+'</div><h2>'+(mode==='pull'?'The room is yours.':'A clean change of hands.')+'</h2><div class="result-score">'+score+'<small> / 100</small></div><p>'+detail+'</p><div class="result-detail">'+(state.notes[0]||'Razuvious stayed hidden from mana users for 6 seconds.')+'</div><button class="primary" id="retry-button">'+icon('reset')+' Practice again <kbd>R</kbd></button><button class="secondary-result" id="next-button">'+(mode==='pull'?'Practice the handoff →':'Practice the pull →')+'</button>';$('#retry-button').onclick=()=>reset(true);$('#next-button').onclick=()=>changeMode(mode==='pull'?'handoff':'pull');updateUI()}
  function update(dt){
@@ -150,10 +171,10 @@ import * as THREE from './vendor/three.module.min.js';
     if(state.resists&&Math.random()<.1){fail('Mind Control resisted.','Your spell did not land. On a real pull, call the resist immediately so the raid can cover or reset.');return}
     const targetID=state.cast.target;state.cast=null;state.registration=state.latency;state.pet=targetID;a.controlled=true;state.channel=60;
     if(!state.combat){state.combat=true;state.aggro='you';addLog('Mind Control landed. Razuvious is coming.');}
-    state.steps[mode==='pull'?2:1]=false;toast('Cast finished. Do not move until control registers.',false,1.5);return;
+    state.steps[mode==='pull'?2:1]=false;toast('Cast finished. Stand still for about 1s while control registers.',false,1.5);return;
    }
   }
-  if(state.registration>0){state.registration-=dt;if(state.registration<=0){state.registration=0;state.steps[mode==='pull'?2:1]=true;addLog('Control registered. Pet frame active. Use the same macro.','success');toast('You control '+state.pet+'. Target Razuvious, then press the same macro.',false,4);tone(620,.08)}}
+  if(state.registration>0){state.registration-=dt;if(state.registration<=0){state.registration=0;state.steps[mode==='pull'?2:1]=true;addLog('Control registered. Pet frame active. Use the same macro.','success');toast('You control '+state.pet+'. Press the same macro to target Razuvious and tank.',false,4);tone(620,.08)}}
   if(state.pet){
    state.channel-=dt;const p=pet();
    if(state.channel<=0){breakControl('The 60-second channel expired. Arrange the next handoff before your MC ends.');return}
@@ -167,7 +188,7 @@ import * as THREE from './vendor/three.module.min.js';
    if(mode==='handoff'){
     state.partner=Math.max(0,state.partner-dt);state.partnerChannel-=dt;
     if(state.partner<4.5&&!state.warning&&state.aggro==='A'){state.warning=true;addLog('Partner: "Wall nearly gone. Your turn."');toast('Partner wall: '+state.partner.toFixed(1)+'s. Shield Wall, then Taunt!',false,4);tone(720,.1)}
-    if(state.partnerChannel<=0&&state.adds[0].controlled){state.adds[0].controlled=false;state.adds[0].immune=45;addLog('Partner released A. Mind Exhaustion: 45s.');if(state.aggro==='A'){fail('Your partner lost control.','The outgoing priest\'s channel ended before you took over. Begin MC earlier, wait for registration, then Wall and Taunt.');return}}
+    if(state.partnerChannel<=0&&state.adds[0].controlled){releaseAdd(state.adds[0]);addLog('Partner released A. Mind Exhaustion: 60s.');if(state.aggro==='A'){fail('Your partner lost control.','The outgoing priest\'s channel ended before you took over. Begin MC earlier, wait for registration, then Wall and Taunt.');return}}
    }
    let tank=state.aggro==='you'?state.priest:state.adds.find(a=>a.id===state.aggro);
    if(tank){
@@ -177,6 +198,19 @@ import * as THREE from './vendor/three.module.min.js';
    state.shout-=dt;if(state.shout<=1.5&&state.shoutCast===0){state.shoutCast=1.5;toast(raidCovered()?'Disrupting Shout incoming. The raid is behind cover.':'Disrupting Shout incoming. Hide the boss from mana users now.',!raidCovered(),2)}
    if(state.shout<=0){state.shout=25;state.shoutCast=0;const exposed=shoutTargets();addLog('Razuvious used Disrupting Shout.');if(exposed.length){for(const u of exposed)u.health=0;state.priest.mana=0;fail('Disrupting Shout hit the raid.','Razuvious could see mana users. Move the boss behind the ramp corner while your understudy tanks him.');return}addLog('Disrupting Shout missed the mana users. The corner blocked it.','success')}
   }
+ }
+ function targetAuras(target){
+  if(!target)return [];
+  const auras=[];
+  if(target.soothe>0)auras.push({id:'soothe',name:'Mind Soothe',left:target.soothe,duration:15,debuff:true});
+  if(target.id==='boss'&&state.taunt>0)auras.push({id:'taunt',name:'Taunt',left:state.taunt,duration:20,debuff:true});
+  if(target.immune>0)auras.push({id:'exhaustion',name:'Mind Exhaustion',left:target.immune,duration:60,debuff:true});
+  if(target.wall>0)auras.push({id:'wall',name:'Shield Wall',left:target.wall,duration:20,debuff:false});
+  return auras;
+ }
+ function auraMarkup(aura){
+  const label=aura.name+', '+Math.ceil(aura.left)+' seconds remaining',sweep=clamp(1-aura.left/aura.duration,0,1)*360;
+  return '<span class="wow-buff'+(aura.debuff?' wow-debuff':'')+'" role="img" aria-label="'+label+'" title="'+label+'" style="background-image:url('+auraAssets[aura.id]+')"><i class="aura-sweep" style="background:conic-gradient(#0008 '+sweep+'deg,transparent 0)"></i><b aria-hidden="true">'+Math.ceil(aura.left)+'</b></span>';
  }
  function updateUI(){
   if(!state)return;const p=pet(),target=getTarget(),registered=!!p&&state.registration<=0,actor=registered?p:state.priest;
@@ -189,7 +223,7 @@ import * as THREE from './vendor/three.module.min.js';
   $('.player-frame .health-bar i').style.width=state.priest.health+'%';$('#player-health-text').textContent=Math.ceil(state.priest.health)+'%';$('#mana-bar').style.width=state.priest.mana+'%';
   let tstatus=target?distance(actor,target).toFixed(1)+' yd · '+(state.target==='boss'?'Boss':'Understudy '+state.target):'No target';
   if(target?.immune>0)tstatus+=' · Exhausted '+target.immune.toFixed(0)+'s';else if(target?.soothe>0)tstatus+=' · Soothed '+target.soothe.toFixed(0)+'s';else if(targetFriendly)tstatus+=' · '+(state.target===state.pet?'Your minion':'Partner');$('#target-state').textContent=tstatus;
-  $('#target-auras').innerHTML=(target?.soothe>0?'<span class="wow-buff soothe-art" title="Mind Soothe"></span>':'')+(target?.wall>0?'<span class="wow-buff wall-art" title="Shield Wall"></span>':'')+(target?.immune>0?'<span class="wow-buff mc-art" title="Mind Exhaustion"></span>':'');
+  $('#target-auras').innerHTML=targetAuras(target).map(auraMarkup).join('');
   $('#player-state').textContent=state.cast?'Casting Mind Control':state.registration>0?'Waiting for control':registered?'Channeling Mind Control':state.mark?'Mark of the Wild':state.combat?'In combat':'Ready to pull';
   $('#mark-buff').hidden=!state.mark;$('#mc-buff').hidden=!registered;
   $('#pet-frame').hidden=!registered;
@@ -210,15 +244,15 @@ import * as THREE from './vendor/three.module.min.js';
  function openDialog(name){
   if(state.status==='running'){pause();dialogsPaused=true}$('#'+name+'-dialog').showModal();
   if(name==='guide')showGuide('controls');
-  if(name==='settings'){$('#latency-setting').value=settings.latency;$('#handoff-setting').value=settings.handoff;$('#movement-setting').value=settings.movement;$('#mark-setting').checked=settings.mark;$('#resist-setting').checked=settings.resists;$('#binding-error').hidden=true;$$('[data-binding]').forEach(input=>input.value=bindings[input.dataset.binding])}
+  if(name==='settings'){$('#latency-setting').value=settings.latency;$('#handoff-setting').value=settings.handoff;$('#movement-setting').value=settings.movement;$('#resist-setting').checked=settings.resists;$('#binding-error').hidden=true;$$('[data-binding]').forEach(input=>input.value=bindings[input.dataset.binding])}
  }
  function closeDialog(dialog){dialog.close();if(dialogsPaused){dialogsPaused=false;if(state.status==='paused')pause()}}
  function showGuide(tab){
   $$('[data-guide]').forEach(b=>b.classList.toggle('selected',b.dataset.guide===tab));
   const content={
-   controls:'<p>The two spell buttons are Mind Soothe <kbd>'+bindings.soothe+'</kbd> and the Mind Control macro <kbd>'+bindings.macro+'</kbd>. Match them to your raid bindings in settings.</p><div class="guide-grid"><div><kbd>W</kbd> Forward. <kbd>S</kbd> Backward.<br><kbd>A</kbd><kbd>D</kbd> Turn. <kbd>Q</kbd><kbd>E</kbd> Strafe.<br>A/D strafing is available in settings.</div><div>Hold right-click to steer with the mouse. A/D strafe while held. Both mouse buttons move forward. Left-drag orbits the camera. Scroll changes camera distance.</div><div>Click an enemy body, marker or nameplate to target it. <kbd>Tab</kbd> cycles targets. After MC, the next Tab targets Razuvious.</div><div><kbd>Esc</kbd> Cancels MC.<br><kbd>P</kbd> Pause. <kbd>R</kbd> Restart.<br><kbd>F</kbd> Also runs the macro unless rebound.</div></div><ol class="guide-list"><li>On the pull, Soothe A from the left side before entering MC range. On the handoff, your partner holds A and B is free.</li><li>Target the free understudy and press <kbd>'+bindings.macro+'</kbd> once. Stand still through the cast and registration pause. Wait for the camera and pet frame.</li><li>Target Razuvious, then press the same macro again. It orders an attack, uses Shield Wall and then Taunt. Repeat when the boss reaches 5 yd. Keep him hidden from the raid on the left.</li></ol><p>Copy this into WoW and bind it to the same key. The macro does not retarget Razuvious. Widow\'s Embrace and Destroy egg belong to other encounters and are omitted here.</p><pre class="macro-code"></pre><button class="copy-macro">Copy Razuvious macro</button>',
-   mechanics:'<ul class="guide-list"><li><strong>Mind Soothe.</strong> Instant, 40 yd range, 1.5s global cooldown. Reduces the target\'s detection range by 10 yd for 15s. It does not soothe Razuvious when cast on an add.</li><li><strong>Mind Control.</strong> 3s cast, 20 yd cast range, up to 60s channel. Stand still through the cast and registration pause. The camera and pet frame switch to the add after registration. Initial casting requires line of sight. Losing line of sight after control is established does not, by itself, end the channel. Priest spells and Escape cancel control.</li><li><strong>Shield Wall.</strong> 75% damage reduction for 20s, 30s cooldown. Use it before Taunt. It is an understudy ability, not the priest\'s Power Word: Shield.</li><li><strong>Taunt.</strong> 5 yd range, 20s forced attack, 60s cooldown. Auto attacks build threat, so expiry does not automatically make the boss change targets. Rotate before protection or control expires.</li><li><strong>Mind Exhaustion.</strong> Releasing an understudy leaves it immune to another MC for 45s. Choose a different available add.</li><li><strong>Positioning.</strong> Razuvious uses Disrupting Shout about every 25s. It hits mana users who can see him. Move the boss behind the ramp corner with your understudy and keep the raid behind the wall. This drill does not require healer line of sight to the understudy or healing while Shield Wall is active.</li></ul>',
-   sources:'<p>Based on the level-60, 40-player Classic encounter. The room is a procedural reconstruction of the circular training floor, four understudies and entry ramp. It is not a copy of the game map.</p><div class="guide-links"><a href="https://www.reddit.com/r/classicwow/comments/lbwj6q/mind_control_on_razuvious_breaking_from_los/" target="_blank" rel="noopener noreferrer">Classic priest reports · MC and line of sight ↗</a><a href="https://warcraft.wiki.gg/wiki/Channeling" target="_blank" rel="noopener noreferrer">Warcraft Wiki · Channeled spells and line of sight ↗</a><a href="https://www.wowhead.com/classic/guide/instructor-razuvious-naxxramas-raid-strategy" target="_blank" rel="noopener noreferrer">Wowhead · Classic Razuvious encounter guide ↗</a><a href="https://www.wowhead.com/classic/spell=29060/taunt" target="_blank" rel="noopener noreferrer">Classic spell data · Taunt ↗</a><a href="https://www.wowhead.com/classic/spell=29061/shield-wall" target="_blank" rel="noopener noreferrer">Classic spell data · Shield Wall ↗</a><a href="https://www.wowhead.com/classic/spell=10953/mind-soothe" target="_blank" rel="noopener noreferrer">Classic spell data · Mind Soothe ↗</a><a href="https://wowwiki-archive.fandom.com/wiki/Instructor_Razuvious_(original)" target="_blank" rel="noopener noreferrer">Original encounter notes · Mind Soothe pull ↗</a><a href="https://www.sageguide.net/naxxramas" target="_blank" rel="noopener noreferrer">Sage Guide · Room and ramp positioning reference ↗</a></div><p><strong>Training approximations.</strong> Room scale, detection radii, the clockwise patrol path, movement, line of sight and damage are estimates. The geometry models two solid ramp rails. The HUD and camera follow the Classic layout, with procedural character and room models. The 200–600 ms registration delay is configurable practice latency. The outgoing partner\'s channel ends 2.4s after the wall to make late handoffs visible. A 100 yd possession limit follows original-era notes, not a verified current-server distance.</p><p>The channel LOS rule is based on first-hand Classic priest reports and channeling documentation. A Blizzard statement specific to Razuvious MC was not found.</p><p>Guided mode shows detection circles and the patrol. Raid night hides these aids. Optional resists use a deliberately exaggerated 10% rate. Random heartbeat breaks, full threat tables, talents, server batching and the wider raid are not simulated. This tool trains the sequence and timing; confirm positioning and spell behavior with your raid.</p><p>Spell icons are Blizzard game assets served by Wowhead. World of Warcraft belongs to Blizzard Entertainment. This trainer is independent. Progress is stored only in your browser.</p>'
+   controls:'<p>The two spell buttons are Mind Soothe <kbd>'+bindings.soothe+'</kbd> and the Mind Control macro <kbd>'+bindings.macro+'</kbd>. Match them to your raid bindings in settings.</p><div class="guide-grid"><div><kbd>W</kbd> Forward. <kbd>S</kbd> Backward.<br><kbd>A</kbd><kbd>D</kbd> Turn. <kbd>Q</kbd><kbd>E</kbd> Strafe.<br>A/D strafing is available in settings.</div><div>Hold right-click to steer with the mouse. A/D strafe while held. Both mouse buttons move forward. Left-drag orbits the camera. Scroll changes camera distance.</div><div>Click an enemy body, marker or nameplate to target it. <kbd>Tab</kbd> cycles targets. After MC, the next Tab targets Razuvious.</div><div><kbd>Esc</kbd> Cancels MC.<br><kbd>P</kbd> Pause. <kbd>R</kbd> Restart.<br><kbd>F</kbd> Also runs the macro unless rebound.</div></div><ol class="guide-list"><li>On the pull, Soothe A from the left side before entering MC range. On the handoff, your partner holds A. Check the other adds for Mind Exhaustion and choose one without it.</li><li>Target the free understudy and press <kbd>'+bindings.macro+'</kbd> once. Stand still for the 3s cast and about 1s more while control registers. Wait for the camera and pet frame.</li><li>Press the same macro again. It targets Razuvious, orders an attack, uses Shield Wall and then Taunt. Repeat when the boss reaches 5 yd. Keep him hidden from the raid on the left.</li></ol><p>Copy this into WoW and bind it to the same key. The macro automatically targets Razuvious while you have a pet. Its Faerlina lines have no effect in this room.</p><pre class="macro-code"></pre><button class="copy-macro">Copy Razuvious macro</button>',
+   mechanics:'<ul class="guide-list"><li><strong>Mind Soothe.</strong> Instant, 40 yd range, 1.5s global cooldown. Reduces the target\'s detection range by 10 yd for 15s. It does not soothe Razuvious when cast on an add.</li><li><strong>Mind Control.</strong> 3s cast, 20 yd cast range, up to 60s channel. Stand still during the cast, then about 1s more for registration. The camera and pet frame switch to the add after registration. Initial casting requires line of sight. Losing line of sight after control is established does not, by itself, end the channel. Priest spells and Escape cancel control.</li><li><strong>Shield Wall.</strong> 75% damage reduction for 20s, 30s cooldown. Use it before Taunt. It is an understudy ability, not the priest\'s Power Word: Shield.</li><li><strong>Taunt.</strong> 5 yd range, 20s forced attack, 60s cooldown. Auto attacks build threat, so expiry does not automatically make the boss change targets. Rotate before protection or control expires.</li><li><strong>Mind Exhaustion.</strong> Releasing an understudy leaves it immune to another MC for 60s. Its Mind Exhaustion icon and countdown appear on the target frame and above its nameplate. Choose an available add without that debuff.</li><li><strong>Positioning.</strong> Razuvious uses Disrupting Shout about every 25s. It hits mana users who can see him. Move the boss behind the ramp corner with your understudy and keep the raid behind the wall. This drill does not require healer line of sight to the understudy or healing while Shield Wall is active.</li></ul>',
+   sources:'<p>Based on the level-60, 40-player Classic encounter. The room is a procedural reconstruction of the circular training floor, four understudies and entry ramp. It is not a copy of the game map.</p><div class="guide-links"><a href="https://warcraft.wiki.gg/wiki/Instructor_Razuvious_(Classic)" target="_blank" rel="noopener noreferrer">Classic encounter notes · 60s Mind Exhaustion ↗</a><a href="https://www.reddit.com/r/classicwow/comments/lbwj6q/mind_control_on_razuvious_breaking_from_los/" target="_blank" rel="noopener noreferrer">Classic priest reports · MC and line of sight ↗</a><a href="https://warcraft.wiki.gg/wiki/Channeling" target="_blank" rel="noopener noreferrer">Warcraft Wiki · Channeled spells and line of sight ↗</a><a href="https://www.wowhead.com/classic/guide/instructor-razuvious-naxxramas-raid-strategy" target="_blank" rel="noopener noreferrer">Wowhead · Classic Razuvious encounter guide ↗</a><a href="https://www.wowhead.com/classic/spell=29060/taunt" target="_blank" rel="noopener noreferrer">Classic spell data · Taunt ↗</a><a href="https://www.wowhead.com/classic/spell=29061/shield-wall" target="_blank" rel="noopener noreferrer">Classic spell data · Shield Wall ↗</a><a href="https://www.wowhead.com/classic/spell=10953/mind-soothe" target="_blank" rel="noopener noreferrer">Classic spell data · Mind Soothe ↗</a><a href="https://wowwiki-archive.fandom.com/wiki/Instructor_Razuvious_(original)" target="_blank" rel="noopener noreferrer">Original encounter notes · Mind Soothe pull ↗</a><a href="https://www.sageguide.net/naxxramas" target="_blank" rel="noopener noreferrer">Sage Guide · Room and ramp positioning reference ↗</a></div><p><strong>Training approximations.</strong> Room scale, detection radii, the clockwise patrol path, movement, line of sight and damage are estimates. Cover checks use the visible ramp rails, corner pillars and outer wall footprints. The raid stands on the left platform up the ramp. The HUD and camera follow the Classic layout, with procedural character and room models. The registration pause is about 1s after the 3s cast, adjustable from 0.8s to 1.2s for practice. The outgoing partner\'s channel ends 2.4s after the wall to make late handoffs visible. A 100 yd possession limit follows original-era notes, not a verified current-server distance.</p><p>The channel LOS rule is based on first-hand Classic priest reports and channeling documentation. A Blizzard statement specific to Razuvious MC was not found.</p><p>Guided mode shows detection circles and the patrol. Raid night hides these aids. Optional resists use a deliberately exaggerated 10% rate. Random heartbeat breaks, full threat tables, talents, server batching and the wider raid are not simulated. This tool trains the sequence and timing; confirm positioning and spell behavior with your raid.</p><p>Spell icons are Blizzard game assets. Mind Soothe and Taunt use the supplied icons; other icons come from Wowhead. World of Warcraft belongs to Blizzard Entertainment. This trainer is independent. Progress is stored only in your browser.</p>'
   };
   $('#guide-content').innerHTML=content[tab];if(tab==='controls'){const code=$('#guide-content .macro-code'),button=$('#guide-content .copy-macro');code.textContent=MC_MACRO;button.onclick=()=>copyMacro(button)}
  }
@@ -246,7 +280,7 @@ import * as THREE from './vendor/three.module.min.js';
  }
  function targetAt(x,y){
   const targets=renderPoints.filter(p=>['A','B','C','D','boss'].includes(p.id));
-  const nameHit=targets.filter(p=>Math.abs(p.x-x)<=p.width/2+9&&y>=p.y-17&&y<=p.y+15||p.marker&&Math.abs(p.marker.x-x)<=15&&Math.abs(p.marker.y-y)<=15).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0];
+  const nameHit=targets.filter(p=>Math.abs(p.x-x)<=p.width/2+9&&y>=p.y-17&&y<=p.y+15||p.marker&&Math.abs(p.marker.x-x)<=15&&Math.abs(p.marker.y-y)<=15||p.auras&&x>=p.auras.left-5&&x<=p.auras.right+5&&y>=p.auras.top-5&&y<=p.auras.bottom+5).sort((a,b)=>Math.hypot(a.x-x,a.y-y)-Math.hypot(b.x-x,b.y-y))[0];
   if(nameHit)return nameHit.id;
   const exact=roomView?.pickNpc(x,y);if(exact)return exact;
   const bodies=targets.filter(p=>p.body&&x>=p.body.left-18&&x<=p.body.right+18&&y>=p.body.top-14&&y<=p.body.bottom+18);
@@ -284,6 +318,7 @@ import * as THREE from './vendor/three.module.min.js';
   if(!mouseButtons){pointerDrag=null;updateHover(e.clientX,e.clientY)}
  }
  function initEvents(){
+  for(const [id,url] of Object.entries(auraAssets)){const image=new Image();image.src=url;auraImages[id]=image}
   updateBindings();
   $$('[data-mode]').forEach(b=>b.onclick=()=>changeMode(b.dataset.mode));$$('[data-action]').forEach(b=>b.onclick=()=>{action(b.dataset.action);dom.viewport.focus({preventScroll:true})});$$('[data-dialog]').forEach(b=>b.onclick=()=>openDialog(b.dataset.dialog));$('#training-nav').onclick=e=>{e.preventDefault();dom.viewport.scrollIntoView({behavior:'smooth',block:'center'})};$$('[data-guide]').forEach(b=>b.onclick=()=>showGuide(b.dataset.guide));$$('.close-dialog').forEach(b=>b.onclick=()=>closeDialog(b.closest('dialog')));
   $$('dialog').forEach(d=>{d.addEventListener('cancel',event=>{event.preventDefault();closeDialog(d)});d.addEventListener('click',e=>{if(e.target===d){const r=d.getBoundingClientRect();if(e.clientX<r.left||e.clientX>r.right||e.clientY<r.top||e.clientY>r.bottom)closeDialog(d)}})});
@@ -291,7 +326,7 @@ import * as THREE from './vendor/three.module.min.js';
    const next={},used=new Set(),movement=$('#movement-setting').value;let error='';
    $$('[data-binding]').forEach(input=>{const value=normalizeBinding(input.value);if(!value)error='Use a letter, number, F-key or a combination such as Shift+G.';else if(used.has(value))error='Each ability needs a different key.';else if(['W','S',...(movement==='classic'?['A','D','Q','E']:['A','D'])].includes(value))error=value+' is used for movement. Add a modifier or choose another key.';else{next[input.dataset.binding]=value;used.add(value)}});
    $('#binding-error').hidden=!error;if(error){$('#binding-error').textContent=error;return}
-   bindings=next;settings.latency=Number($('#latency-setting').value);settings.handoff=Number($('#handoff-setting').value);settings.movement=movement;settings.mark=$('#mark-setting').checked;settings.resists=$('#resist-setting').checked;
+   bindings=next;settings.latency=Number($('#latency-setting').value);settings.handoff=Number($('#handoff-setting').value);settings.movement=movement;settings.resists=$('#resist-setting').checked;
    persist('razuvious.bindings.v1',bindings);persist('razuvious.settings.v1',settings);updateBindings();closeDialog($('#settings-dialog'));if(state.status==='ready')reset();
   };
   $('#restart-button').onclick=()=>reset();$('#pause-button').onclick=pause;
@@ -364,14 +399,14 @@ import * as THREE from './vendor/three.module.min.js';
    const sigTex=new T.CanvasTexture(sigil);sigTex.colorSpace=T.SRGBColorSpace;const center=mesh(new T.CircleGeometry(6,64),new T.MeshStandardMaterial({map:sigTex,roughness:1,emissive:'#766133',emissiveIntensity:.3}),0,.045,-6);center.rotation.x=-Math.PI/2;
    const circleBand=mesh(new T.RingGeometry(6,6.8,64),edgeMat,0,.04,-6);circleBand.rotation.x=-Math.PI/2;
    // Cutaway outer wall, buttresses, arches and green braziers.
-   for(let n=0;n<32;n++){const a=n/32*Math.PI*2,x=Math.sin(a)*25.6,z=-6+Math.cos(a)*25.6;if(z>15)continue;const wall=box(5.5,6.8,1.8,wallMat,x,3.25,z);wall.rotation.y=a;const foot=box(5.55,.55,2.2,edgeMat,x,.3,z);foot.rotation.y=a;const cap=box(5.55,.5,2.2,edgeMat,x,6.7,z);cap.rotation.y=a;
+   for(const {x,z,w,h,d,y,angle:a,n} of outerWalls){const wall=box(w,h,d,wallMat,x,y,z);wall.rotation.y=a;const foot=box(5.55,.55,2.2,edgeMat,x,.3,z);foot.rotation.y=a;const cap=box(5.55,.5,2.2,edgeMat,x,6.7,z);cap.rotation.y=a;
     for(let row=1;row<5;row++){const joint=box(5.5,.045,1.83,darkMat,x,row*1.3,z);joint.rotation.y=a}
     if(n%3===0){const column=mesh(new T.CylinderGeometry(.8,1,8,6),edgeMat,x,4,z);box(2.2,.7,2.2,darkMat,x,.35,z);box(2,.55,2,edgeMat,x,7.7,z);const alcove=box(2.4,3.8,.3,darkMat,x-Math.sin(a)*1,z?3.7:3.7,z-Math.cos(a)*1);alcove.rotation.y=a;const frame=mesh(new T.TorusGeometry(1.25,.12,6,12,Math.PI),metalMat,x-Math.sin(a)*1.25,5.35,z-Math.cos(a)*1.25);frame.rotation.y=a;column.receiveShadow=true}
    }
    for(const [x,z] of [[-18,7],[18,7],[-20,-15],[20,-15],[-8,-29],[8,-29]]){box(1.6,1.4,1.6,darkMat,x,.7,z);mesh(new T.CylinderGeometry(1.15,.6,.7,8),metalMat,x,1.65,z);const flame=mesh(new T.ConeGeometry(.55,1.6,6),new T.MeshStandardMaterial({color:'#c4eaa2',emissive:'#7cc894',emissiveIntensity:2.2,transparent:true,opacity:.85}),x,2.65,z);const light=new T.PointLight('#98d5a1',35,14,2);light.position.set(x,3,z);scene.add(light);flame.userData.flame=true}
    for(let n=0;n<13;n++){const z=18+n;box(12.8,.28,1.08,floorMat,0,.16*n,z);box(14,.28,1.08,floorMat,-15,.16*n,z)}
    box(57,.9,7,edgeMat,0,1.62,34);box(57,.1,7,floorMat,0,2.11,34);
-   for(const x of [-7.1,7.1]){box(1.3,2.5,12.2,wallMat,x,1.7,24);box(1.7,.3,12.6,edgeMat,x,3,24);for(const z of [18,24,30]){box(2.1,3.4,2.1,edgeMat,x,1.6,z);box(2.3,.25,2.3,darkMat,x,3.32,z)}}
+   for(const {x,z,w,h,d,y,kind} of rampWalls){box(w,h,d,kind==='rail'?wallMat:edgeMat,x,y,z);if(kind==='rail')box(1.7,.3,12.6,edgeMat,x,3,z);else box(2.3,.25,2.3,darkMat,x,3.32,z)}
    // Weapon racks on the flanks of the training ring.
    for(const x of [-22,22]){box(.3,2.3,5,metalMat,x,1.3,-4);for(let n=0;n<5;n++){const sword=box(.11,2.4,.2,edgeMat,x,1.9,-6+n);sword.rotation.z=x>0?-.3:.3;box(.7,.08,.15,metalMat,x,2.5,-6+n)}}
    const models={},npcMeshes=[];const raycaster=new T.Raycaster(),pickPoint=new T.Vector2();
@@ -432,6 +467,18 @@ import * as THREE from './vendor/three.module.min.js';
  }
  function fallbackProject(e,y=0){const scale=Math.min(viewWidth/66,viewHeight/71);return{x:viewWidth/2+e.x*scale,y:viewHeight/2+(e.z+1)*scale-y*.8}}
  function drawFallback(){const c=fallbackCtx;c.clearRect(0,0,viewWidth,viewHeight);c.fillStyle='#252c32';c.fillRect(0,0,viewWidth,viewHeight);const sc=Math.min(viewWidth/66,viewHeight/71),center=fallbackProject({x:0,z:-6});c.beginPath();c.arc(center.x,center.y,24.5*sc,0,Math.PI*2);c.fillStyle='#484751';c.fill();c.lineWidth=8;c.strokeStyle='#5d5e6e';c.stroke();c.strokeStyle='#807c6355';for(const r of [6,6.8,11]){c.beginPath();c.arc(center.x,center.y,r*sc,0,Math.PI*2);c.stroke()}for(const x of [-7.1,7.1]){const p=fallbackProject({x,z:18}),q=fallbackProject({x,z:31});c.strokeStyle='#787789';c.lineWidth=sc;c.beginPath();c.moveTo(p.x,p.y);c.lineTo(q.x,q.y);c.stroke()}for(const e of [state.priest,...state.adds,state.boss]){const p=fallbackProject(e);if(guided&&!state.combat&&e.id!=='you'){c.beginPath();c.arc(p.x,p.y,(e.id==='boss'?22:e.soothe>0?10:20)*sc,0,Math.PI*2);c.lineWidth=1;c.strokeStyle=e.soothe>0?'#b5ce7950':'#cd967540';c.stroke()}c.beginPath();c.arc(p.x,p.y,(e.id==='boss'?1.7:1.1)*sc,0,Math.PI*2);c.fillStyle=e.id==='you'?'#add4de':e.id==='boss'?'#c97964':'#abb5a0';c.fill();if(e.id===state.target){c.strokeStyle='#decb9a';c.lineWidth=2;c.stroke()}}}
+ function drawNameplateAuras(c,auras,x,top,size){
+  const gap=5,total=auras.length*size+(auras.length-1)*gap;
+  auras.forEach((aura,i)=>{
+   const left=x-total/2+i*(size+gap),image=auraImages[aura.id];
+   c.fillStyle='#0c0810';c.fillRect(left-2,top-2,size+4,size+4);
+   if(image?.complete&&image.naturalWidth)c.drawImage(image,left,top,size,size);
+   const elapsed=clamp(1-aura.left/aura.duration,0,1)*Math.PI*2;
+   c.save();c.beginPath();c.rect(left,top,size,size);c.clip();c.beginPath();c.moveTo(left+size/2,top+size/2);c.arc(left+size/2,top+size/2,size,-Math.PI/2,-Math.PI/2+elapsed);c.closePath();c.fillStyle='#0008';c.fill();c.restore();
+   c.strokeStyle='#b32e2b';c.lineWidth=2;c.strokeRect(left-1,top-1,size+2,size+2);
+   c.textAlign='center';c.font='bold 11px Arial';c.strokeStyle='#080609';c.lineWidth=3;c.strokeText(Math.ceil(aura.left),left+size/2,top+size+12);c.fillStyle='#fff7df';c.fillText(Math.ceil(aura.left),left+size/2,top+size+12);
+  });
+ }
  function drawOverlay(){
   const c=overlayCtx;c.clearRect(0,0,viewWidth,viewHeight);renderPoints=[];
   const projection=(e,y)=>roomView?roomView.project(e,y):{...fallbackProject(e,y),visible:true};
@@ -441,11 +488,13 @@ import * as THREE from './vendor/three.module.min.js';
    if(e.id==='you'&&!tactical||e.id.startsWith('raid')||e.id==='partner')continue;
    const selected=e.id===state.target,controlled=e.controlled,label=e.id==='you'?'Your priest':e.id==='boss'?'Instructor Razuvious':'Deathknight Understudy '+e.id;
    const pt=projection(e,e.id==='boss'?5.7:4.2);if(!tactical&&distance(actor,e)>43)continue;const body=roomView?roomView.bodyBounds(e):(()=>{const center=projection(e,1.5);return{left:center.x-27,right:center.x+27,top:center.y-32,bottom:center.y+32}})();if(!pt.visible&&!body)continue;
-   const font=tactical?(e.id==='boss'?12:11):(selected?15:13);c.font=(selected?'600 ':'')+font+'px Arial';const width=c.measureText(label).width+16;renderPoints.push({id:e.id,x:pt.x,y:pt.y,width,body,marker:e.id!=='boss'&&e.id!=='you'?{x:pt.x,y:pt.y-(tactical?21:30)}:null});if(!pt.visible)continue;
+   const auras=targetAuras(e).filter(aura=>aura.debuff),auraSize=tactical?22:27,auraTop=pt.y-auraSize-29,markerY=auras.length?auraTop-17:pt.y-(tactical?21:30);
+   const font=tactical?(e.id==='boss'?12:11):(selected?15:13);c.font=(selected?'600 ':'')+font+'px Arial';const width=c.measureText(label).width+16;renderPoints.push({id:e.id,x:pt.x,y:pt.y,width,body,marker:e.id!=='boss'&&e.id!=='you'?{x:pt.x,y:markerY}:null,auras:auras.length?{left:pt.x-(auras.length*(auraSize+5)-5)/2,right:pt.x+(auras.length*(auraSize+5)-5)/2,top:auraTop-2,bottom:auraTop+auraSize+15}:null});if(!pt.visible)continue;
    c.textAlign='center';c.shadowColor='#000';c.shadowBlur=4;c.lineWidth=3;c.strokeStyle='#101014';c.strokeText(label,pt.x,pt.y);c.fillStyle=e.id==='you'?'#c5e5e6':controlled?'#35f14a':'#ed5141';c.fillText(label,pt.x,pt.y);c.shadowBlur=0;
    if(selected){const barWidth=Math.min(width*.7,100);c.fillStyle='#171515bb';c.fillRect(pt.x-barWidth/2,pt.y+5,barWidth,5);c.fillStyle=controlled?'#25c832':'#b7251a';c.fillRect(pt.x-barWidth/2,pt.y+5,barWidth*e.health/100,5)}
+   if(auras.length)drawNameplateAuras(c,auras,pt.x,auraTop,auraSize);
    if(e.id!=='boss'&&e.id!=='you'){
-    const markerY=pt.y-(tactical?21:30),colors={A:'#d970ee',B:'#ffe54a',C:'#50a9ed',D:'#e97e34'};c.fillStyle=colors[e.id];c.strokeStyle='#f0e3b577';c.lineWidth=1;c.beginPath();
+    const colors={A:'#d970ee',B:'#ffe54a',C:'#50a9ed',D:'#e97e34'};c.fillStyle=colors[e.id];c.strokeStyle='#f0e3b577';c.lineWidth=1;c.beginPath();
     if(e.id==='A'){c.moveTo(pt.x,markerY-9);c.lineTo(pt.x+7,markerY);c.lineTo(pt.x,markerY+9);c.lineTo(pt.x-7,markerY);c.closePath()}
     else if(e.id==='B'){for(let n=0;n<10;n++){const angle=-Math.PI/2+n*Math.PI/5,r=n%2?4:9;n?c.lineTo(pt.x+Math.cos(angle)*r,markerY+Math.sin(angle)*r):c.moveTo(pt.x+Math.cos(angle)*r,markerY+Math.sin(angle)*r)}c.closePath()}
     else if(e.id==='C')c.rect(pt.x-6,markerY-6,12,12);else c.arc(pt.x,markerY,7,0,Math.PI*2);c.fill();c.stroke();
